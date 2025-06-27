@@ -8,7 +8,9 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that p
 
 - **Real-time Weather Data**: Access current weather conditions from SMHI weather stations
 - **Weather Forecasts**: Get detailed forecasts for any location in Sweden
-- **Station Information**: Browse temperature and snow depth monitoring stations
+- **Station Search**: Find weather stations by name using fuzzy matching
+- **Multi-Resolution Data**: Access hourly, daily, and monthly weather data
+- **Historical Data**: Query past weather records with pagination and date filtering
 - **MCP Protocol**: Full compatibility with Claude and other MCP clients
 - **Serverless**: Runs on Cloudflare Workers with global edge deployment
 - **No API Keys Required**: Uses SMHI's free open data APIs
@@ -17,17 +19,37 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that p
 
 **Deployed Server:** https://smhi-mcp.hakan-3a6.workers.dev
 
-## 📋 Available Tools
+## 📋 Available Tools (19 Total)
 
+### Legacy Simple Tools
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `list_temperature_stations` | List all available temperature monitoring stations | None |
-| `list_snow_depth_stations` | List all available snow depth monitoring stations | None |
+| `list_temperature_stations` | List predefined temperature monitoring stations | None |
+| `list_snow_depth_stations` | List predefined snow depth monitoring stations | None |
 | `get_station_temperature` | Get latest temperature reading from a specific station | `station_id` (string) |
 | `get_station_snow_depth` | Get latest snow depth reading from a specific station | `station_id` (string) |
 | `get_weather_forecast` | Get weather forecast for coordinates | `lat` (number), `lon` (number) |
-| `list_all_temperature_stations` | Get all temperature stations with pagination | `cursor` (string, optional) |
-| `list_all_snow_depth_stations` | Get all snow depth stations with pagination | `cursor` (string, optional) |
+
+### Multi-Resolution Data Tools
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `get_station_precipitation` | Get precipitation data with multiple resolutions | `station_id`, `parameter` (5=daily, 7=hourly, 14=15min, 23=monthly), `period` |
+| `get_temperature_multi_resolution` | Get temperature data with multiple resolutions | `station_id`, `parameter` (1=hourly, 2=daily-mean, 19=min, 20=max, 22=monthly), `period` |
+| `get_station_metadata` | Get detailed station metadata and available periods | `station_id`, `parameter` |
+
+### Historical Data & Pagination
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `get_historical_data` | Get historical data with pagination and date filtering | `station_id`, `parameter`, `period`, `limit`, `cursor`, `reverse`, `fromDate`, `toDate` |
+| `list_all_temperature_stations` | Get all temperature stations with pagination | `cursor` (optional) |
+| `list_all_snow_depth_stations` | Get all snow depth stations with pagination | `cursor` (optional) |
+| `list_all_precipitation_stations` | Get all precipitation stations with pagination | `parameter`, `cursor` |
+
+### Station Search Tools
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `search_stations_by_name` | Search stations by name within a specific parameter type | `query`, `parameter` (1=temp, 5=precip, 8=snow), `limit`, `threshold` |
+| `search_stations_by_name_multi_param` | Search stations by name across all parameter types | `query`, `limit`, `threshold` |
 
 ## 🛠️ Quick Start
 
@@ -113,6 +135,43 @@ npm run dev
 }
 ```
 
+### Search for Weather Stations
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "method": "tools/call",
+  "params": {
+    "name": "search_stations_by_name_multi_param",
+    "arguments": {
+      "query": "Stockholm",
+      "limit": 5,
+      "threshold": 0.3
+    }
+  }
+}
+```
+
+### Get Historical Data with Pagination
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "tools/call",
+  "params": {
+    "name": "get_historical_data",
+    "arguments": {
+      "station_id": "159880",
+      "parameter": "1",
+      "period": "corrected-archive",
+      "limit": 20,
+      "fromDate": "2024-01-01",
+      "toDate": "2024-01-31"
+    }
+  }
+}
+```
+
 ## 🧪 Testing
 
 ### Using cURL
@@ -126,6 +185,11 @@ curl -X POST -H "Content-Type: application/json" \
 # Test weather forecast for Stockholm
 curl -X POST -H "Content-Type: application/json" \
   -d '{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "get_weather_forecast", "arguments": {"lat": 59.3293, "lon": 18.0686}}}' \
+  https://smhi-mcp.hakan-3a6.workers.dev
+
+# Search for weather stations
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "search_stations_by_name_multi_param", "arguments": {"query": "Stockholm", "limit": 3}}}' \
   https://smhi-mcp.hakan-3a6.workers.dev
 ```
 
@@ -165,12 +229,15 @@ All weather data comes from [SMHI (Swedish Meteorological and Hydrological Insti
 
 ### Sample Weather Stations
 
-| Station ID | Name | Location |
-|------------|------|----------|
-| 159880 | Arvidsjaur | Northern Sweden |
-| 155960 | Tärnaby/Hemavan | Mountain region |
-| 132170 | Storlien-Storvallen | Norwegian border |
-| 188850 | Katterjåkk/Riksgränsen | Arctic region |
+| Station ID | Name | Location | Note |
+|------------|------|----------|------|
+| 159880 | Arvidsjaur | Northern Sweden | Temperature & precipitation |
+| 155960 | Tärnaby/Hemavan | Mountain region | Temperature data |
+| 155940 | Mosekälla/Hemavan | Mountain region | Same location, different parameter names |
+| 132170 | Storlien-Storvallen | Norwegian border | Alpine weather station |
+| 188850 | Katterjåkk/Riksgränsen | Arctic region | Northernmost station |
+
+**Note**: Some stations have different names depending on the parameter type. Use `search_stations_by_name_multi_param` to find stations across all data types.
 
 ## 🔧 Configuration
 
@@ -226,12 +293,23 @@ To use this server with Claude:
 2. **API**: Include the server in your MCP client configuration
 3. **Custom Integration**: Use the JSON-RPC protocol directly
 
-Example Claude conversation:
+Example Claude conversations:
 ```
 You: "What's the current temperature in Arvidsjaur?"
 Claude: "Let me check the current temperature in Arvidsjaur for you."
 [Uses get_station_temperature with station_id "159880"]
 Claude: "The current temperature in Arvidsjaur is 15.8°C."
+
+You: "Find weather stations near Stockholm"
+Claude: "Let me search for weather stations near Stockholm."
+[Uses search_stations_by_name_multi_param with query "Stockholm"]
+Claude: "I found several weather stations near Stockholm, including Stockholm A (98230) and Stockholm-Observatoriekullen (98210)."
+
+You: "Show me temperature data for Mosekälla from January 2024"
+Claude: "Let me search for Mosekälla and get the temperature data."
+[Uses search_stations_by_name_multi_param with query "Mosekälla"]
+[Uses get_historical_data with station_id "155940", fromDate "2024-01-01", toDate "2024-01-31"]
+Claude: "Found Mosekälla (station 155940) - here's the temperature data for January 2024..."
 ```
 
 ## 🤝 Contributing

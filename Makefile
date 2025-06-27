@@ -120,4 +120,14 @@ test-stations:
 	@curl -s -X POST \
 		-H "Content-Type: application/json" \
 		-d '{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "list_temperature_stations", "arguments": {}}}' \
-		https://smhi-mcp.your-subdomain.workers.dev | jq . || echo "Failed or no jq installed"
+		https://smhi-mcp.hakan-3a6.workers.dev | jq . || echo "Failed or no jq installed"
+
+# Run comprehensive test suite
+test-all:
+	@echo "Running comprehensive SMHI MCP test suite..."
+	@node test-mcp.js
+
+# Test pagination functionality
+test-pagination:
+	@echo "Testing historical data pagination..."
+	@node -e "const MCPTester = require('./test-mcp.js'); const tester = new MCPTester('https://smhi-mcp.hakan-3a6.workers.dev'); tester.testHistoricalDataPagination();"
