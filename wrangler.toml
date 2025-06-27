@@ -1,0 +1,11 @@
+name = "smhi-mcp"
+main = "worker.js"
+compatibility_date = "2023-12-18"
+
+# Environment configuration
+[env.production.vars]
+# Add any public configuration variables here
+
+# Optional: Uncomment if you want to add authentication
+# [[env.production.secrets]]
+# API_KEY = ""
