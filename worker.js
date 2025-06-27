@@ -447,24 +447,150 @@ async function get_station_metadata(station_id, parameter) {
 
 async function get_historical_data(station_id, parameter, period, limit = 10, cursor = null, reverse = true, fromDate = null, toDate = null) {
     try {
-        const url = `${METOBS_BASE_URL}/parameter/${parameter}/station/${station_id}/period/${period}/data.json`;
-        const data = await makeSmhiRequest(url);
+        // First get metadata to find CSV download URL
+        const metadataUrl = `${METOBS_BASE_URL}/parameter/${parameter}/station/${station_id}/period/${period}.json`;
+        let metadata;
         
-        if (!data.value || data.value.length === 0) {
+        try {
+            metadata = await makeSmhiRequest(metadataUrl);
+        } catch (e) {
+            // If the specific parameter/period combination fails, check what's available for this station
+            try {
+                const stationUrl = `${METOBS_BASE_URL}/parameter/${parameter}/station/${station_id}.json`;
+                const stationInfo = await makeSmhiRequest(stationUrl);
+                const availablePeriods = stationInfo.period?.map(p => p.key) || [];
+                
+                return {
+                    type: "text",
+                    text: `Error: No data available for station ${station_id}, parameter ${parameter}, period ${period}.\n` +
+                           `Available periods for this parameter: ${availablePeriods.join(', ') || 'none'}\n` +
+                           `Station: ${stationInfo.title || 'Unknown'}`
+                };
+            } catch (stationError) {
+                // If station doesn't support this parameter at all, suggest checking what parameters are available
+                return {
+                    type: "text",
+                    text: `Error: Station ${station_id} does not support parameter ${parameter}.\n` +
+                           `Use search_stations_by_name_multi_param to find what parameters this station supports, or try a different parameter:\n` +
+                           `• 1 = hourly temperature\n` +
+                           `• 2 = daily mean temperature\n` +
+                           `• 5 = daily precipitation\n` +
+                           `• 8 = snow depth`
+                };
+            }
+        }
+        
+        // Extract CSV download URL from metadata
+        const dataSection = metadata.data?.[0];
+        const csvLink = dataSection?.link?.find(link => 
+            link.type === 'text/plain' && link.href?.includes('data.csv')
+        );
+        if (!csvLink) {
             return {
                 type: "text",
-                text: `Error: No historical data available for station ${station_id}, parameter ${parameter}, period ${period}`
+                text: `Error: No CSV data available for station ${station_id}, parameter ${parameter}, period ${period}`
+            };
+        }
+        
+        // Download and parse CSV data
+        const csvResponse = await fetch(csvLink.href, {
+            headers: {
+                'accept': 'text/csv',
+                'referer': 'https://opendata.smhi.se/',
+                'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)'
+            }
+        });
+        
+        if (!csvResponse.ok) {
+            throw new Error(`CSV download failed: ${csvResponse.status} ${csvResponse.statusText}`);
+        }
+        
+        const csvText = await csvResponse.text();
+        const lines = csvText.trim().split('\n');
+        
+        if (lines.length < 2) {
+            return {
+                type: "text",
+                text: `Error: No data found in CSV for station ${station_id}, parameter ${parameter}, period ${period}`
+            };
+        }
+        
+        // Parse CSV data - find where actual data starts (after metadata headers)
+        const values = [];
+        let dataStartIndex = -1;
+        
+        // Find the line that starts the actual data (contains "Från Datum Tid" or similar timestamp pattern)
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line.includes('Från Datum Tid') || line.includes('Datum Tid (UTC)')) {
+                dataStartIndex = i + 1; // Data starts after this header line
+                break;
+            }
+        }
+        
+        // If we didn't find the header, try to detect data lines by pattern
+        if (dataStartIndex === -1) {
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                const parts = line.split(';');
+                // Look for lines that start with a date pattern (YYYY-MM-DD)
+                if (parts.length >= 4 && parts[0].match(/^\d{4}-\d{2}-\d{2}/)) {
+                    dataStartIndex = i;
+                    break;
+                }
+            }
+        }
+        
+        if (dataStartIndex === -1) {
+            return {
+                type: "text",
+                text: `Error: Could not find data section in CSV for station ${station_id}, parameter ${parameter}, period ${period}`
+            };
+        }
+        
+        // Parse actual data rows
+        for (let i = dataStartIndex; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            
+            const parts = line.split(';');
+            if (parts.length >= 4) {
+                // CSV format: Från Datum Tid;Till Datum Tid;Representativt dygn;Value;Quality
+                const fromDate = parts[0];
+                const toDate = parts[1];
+                const reprDate = parts[2];
+                const value = parseFloat(parts[3]);
+                const quality = parts[4];
+                
+                // Use the representative date as the main date
+                const dateToUse = reprDate || fromDate;
+                
+                // Only include valid data points
+                if (!isNaN(value) && dateToUse) {
+                    values.push({
+                        date: dateToUse,
+                        value: value,
+                        quality: quality || 'Unknown'
+                    });
+                }
+            }
+        }
+        
+        if (values.length === 0) {
+            return {
+                type: "text",
+                text: `Error: No valid data points found for station ${station_id}, parameter ${parameter}, period ${period}`
             };
         }
         
         // Apply date filtering if specified
-        let filteredData = data.value;
+        let filteredData = values;
         if (fromDate || toDate) {
             const fromTimestamp = fromDate ? new Date(fromDate).getTime() : 0;
             const toTimestamp = toDate ? new Date(toDate).getTime() : Infinity;
             
-            filteredData = data.value.filter(item => {
-                const itemTimestamp = new Date(item.date).getTime() || parseInt(item.date);
+            filteredData = values.filter(item => {
+                const itemTimestamp = new Date(item.date).getTime();
                 return itemTimestamp >= fromTimestamp && itemTimestamp <= toTimestamp;
             });
             
@@ -489,7 +615,7 @@ async function get_historical_data(station_id, parameter, period, limit = 10, cu
         }
         
         // For reverse pagination (newest first), start from the end
-        let values;
+        let paginatedValues;
         let nextCursor = null;
         let prevCursor = null;
         
@@ -497,7 +623,7 @@ async function get_historical_data(station_id, parameter, period, limit = 10, cu
             // Reverse pagination: show newest data first
             const endIndex = totalValues - startIndex;
             const actualStartIndex = Math.max(0, endIndex - limit);
-            values = filteredData.slice(actualStartIndex, endIndex).reverse();
+            paginatedValues = filteredData.slice(actualStartIndex, endIndex).reverse();
             
             // Calculate cursors
             if (endIndex < totalValues) {
@@ -509,7 +635,7 @@ async function get_historical_data(station_id, parameter, period, limit = 10, cu
         } else {
             // Forward pagination: show oldest data first
             const endIndex = Math.min(totalValues, startIndex + limit);
-            values = filteredData.slice(startIndex, endIndex);
+            paginatedValues = filteredData.slice(startIndex, endIndex);
             
             // Calculate cursors  
             if (startIndex > 0) {
@@ -537,27 +663,36 @@ async function get_historical_data(station_id, parameter, period, limit = 10, cu
                     parameter.includes("PRECIP") ? "mm" :
                     parameter === SMHIParameter.SNOW_DEPTH ? "m" : "";
         
-        const dataPoints = values.map(v => `${v.date}: ${v.value}${unit}`).join('\n');
+        const dataPoints = paginatedValues.map(v => `${v.date}: ${v.value}${unit} (${v.quality})`).join('\n');
         
-        let paginationInfo = `\nShowing ${values.length} of ${totalValues} total values`;
+        let paginationInfo = `\nShowing ${paginatedValues.length} of ${totalValues} total values`;
         if (fromDate || toDate) {
             paginationInfo += `\nFiltered between: ${fromDate || 'beginning'} and ${toDate || 'end'}`;
-            paginationInfo += `\nOriginal dataset: ${data.value.length} values`;
+            paginationInfo += `\nOriginal dataset: ${values.length} values`;
         }
         if (nextCursor) paginationInfo += `\nNext page cursor: ${nextCursor}`;
         if (prevCursor) paginationInfo += `\nPrevious page cursor: ${prevCursor}`;
         
+        // Extract station name from metadata title (format: "Parameter - StationName: ...")
+        let stationName = metadata.station?.name || metadata.name || 'Unknown';
+        if (metadata.title && metadata.title.includes(' - ') && metadata.title.includes(':')) {
+            const titleParts = metadata.title.split(' - ')[1];
+            if (titleParts) {
+                stationName = titleParts.split(':')[0].trim();
+            }
+        }
+
         return {
             type: "text",
             text: `Historical ${parameterName.toLowerCase()} for station ${station_id}:\n` +
                    `Period: ${period}\n` +
-                   `Station: ${data.station?.name || 'Unknown'}\n` +
+                   `Station: ${stationName}\n` +
                    `Order: ${reverse ? 'Newest first' : 'Oldest first'}\n\n` +
                    `${dataPoints}${paginationInfo}`,
             nextCursor: nextCursor,
             prevCursor: prevCursor,
             totalCount: totalValues,
-            originalCount: data.value.length,
+            originalCount: values.length,
             filtered: !!(fromDate || toDate)
         };
     } catch (e) {
