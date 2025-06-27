@@ -1,3 +1,120 @@
+const snowmobileConditionsStations = {
+    // Stations with both temperature AND snow depth - ideal for snowmobile conditions
+    "159770": { 
+        name: "Glommersträsk", 
+        hasTemperature: true, 
+        hasSnowDepth: true,
+        region: "Northern Sweden"
+    },
+    "188850": { 
+        name: "Katterjåkk/Riksgränsen", 
+        hasTemperature: true, 
+        hasSnowDepth: true,
+        region: "Arctic/Mountain"
+    },
+    "166810": { 
+        name: "Gautosjö", 
+        hasTemperature: true, 
+        hasSnowDepth: true,
+        region: "Northern Sweden"
+    },
+    
+    // Temperature-only stations in snowmobile regions
+    "155960": { 
+        name: "Tärnaby/Hemavan (800m)", 
+        hasTemperature: true, 
+        hasSnowDepth: false,
+        region: "Mountain"
+    },
+    "155970": { 
+        name: "Tärnaby/Hemavan (450m)", 
+        hasTemperature: true, 
+        hasSnowDepth: false,
+        region: "Mountain"
+    },
+    "155790": { 
+        name: "Gielas A", 
+        hasTemperature: true, 
+        hasSnowDepth: false,
+        region: "Northern Sweden"
+    },
+    "166910": { 
+        name: "Mierkenis", 
+        hasTemperature: true, 
+        hasSnowDepth: false,
+        region: "Northern Sweden"
+    },
+    "132170": { 
+        name: "Storlien-Storvallen", 
+        hasTemperature: true, 
+        hasSnowDepth: false,
+        region: "Mountain"
+    },
+    "159880": { 
+        name: "Arvidsjaur", 
+        hasTemperature: true, 
+        hasSnowDepth: false,
+        region: "Northern Sweden"
+    },
+    "151280": { 
+        name: "Lövånger/Bjuröklubb", 
+        hasTemperature: true, 
+        hasSnowDepth: false,
+        region: "Coastal"
+    },
+    
+    // Snow depth-only stations in snowmobile regions
+    "145500": { 
+        name: "Borgafjäll", 
+        hasTemperature: false, 
+        hasSnowDepth: true,
+        region: "Mountain"
+    },
+    "158970": { 
+        name: "Arvidsjaur", 
+        hasTemperature: false, 
+        hasSnowDepth: true,
+        region: "Northern Sweden"
+    },
+    "132180": { 
+        name: "Storlien-Storvallen", 
+        hasTemperature: false, 
+        hasSnowDepth: true,
+        region: "Mountain"
+    },
+    "155770": { 
+        name: "Kittelfjäll", 
+        hasTemperature: false, 
+        hasSnowDepth: true,
+        region: "Mountain"
+    },
+    "155940": { 
+        name: "Tärnaby/Hemavan", 
+        hasTemperature: false, 
+        hasSnowDepth: true,
+        region: "Mountain"
+    },
+    "158820": { 
+        name: "Adak", 
+        hasTemperature: false, 
+        hasSnowDepth: true,
+        region: "Northern Sweden"
+    },
+    "144530": { 
+        name: "Jorm", 
+        hasTemperature: false, 
+        hasSnowDepth: true,
+        region: "Mountain"
+    },
+    "151220": { 
+        name: "Lövånger", 
+        hasTemperature: false, 
+        hasSnowDepth: true,
+        region: "Coastal"
+    }
+};
+
+// Legacy station maps for backward compatibility (deprecated)
 const temperatureStations = {
     "155960": "Tärnaby/Hemavan at altitude 800m ",
     "155970": "Tärnaby/Hemavan at altitude 450m",
@@ -69,17 +186,72 @@ async function makeSmhiRequest(url) {
     return response.json();
 }
 
+async function list_snowmobile_conditions() {
+    const stationsByRegion = {
+        "Arctic/Mountain": [],
+        "Mountain": [],
+        "Northern Sweden": [],
+        "Coastal": []
+    };
+    
+    let totalStations = 0;
+    let dualCapabilityStations = 0;
+    
+    for (const [id, info] of Object.entries(snowmobileConditionsStations)) {
+        const capabilities = [];
+        if (info.hasTemperature) capabilities.push("Temperature");
+        if (info.hasSnowDepth) capabilities.push("Snow Depth");
+        
+        if (info.hasTemperature && info.hasSnowDepth) {
+            dualCapabilityStations++;
+        }
+        
+        stationsByRegion[info.region].push({
+            id: id,
+            name: info.name,
+            capabilities: capabilities.join(" + ")
+        });
+        totalStations++;
+    }
+    
+    // Sort stations within each region by ID
+    for (const region in stationsByRegion) {
+        stationsByRegion[region].sort((a, b) => a.id.localeCompare(b.id));
+    }
+    
+    const regionOutput = Object.entries(stationsByRegion)
+        .filter(([region, stations]) => stations.length > 0)
+        .map(([region, stations]) => 
+            `📍 ${region} (${stations.length} stations):\n` + 
+            stations.map(s => `  ${s.id}: ${s.name} (${s.capabilities})`).join('\n')
+        ).join('\n\n');
+    
+    return {
+        type: "text",
+        text: `🛷 Snowmobile Conditions Monitoring Stations\n\n` +
+               `${regionOutput}\n\n` +
+               `📊 Summary:\n` +
+               `• Total stations: ${totalStations}\n` +
+               `• Dual capability (temp + snow): ${dualCapabilityStations}\n` +
+               `• Temperature only: ${totalStations - dualCapabilityStations - Object.values(snowmobileConditionsStations).filter(s => !s.hasTemperature && s.hasSnowDepth).length}\n` +
+               `• Snow depth only: ${Object.values(snowmobileConditionsStations).filter(s => !s.hasTemperature && s.hasSnowDepth).length}\n\n` +
+               `💡 Use get_station_temperature or get_station_snow_depth with station IDs above.\n` +
+               `🔍 Use search_stations_by_name_multi_param to find additional stations.`
+    };
+}
+
+// Legacy functions for backward compatibility (deprecated)
 async function list_temperature_stations() {
     return {
         type: "text",
-        text: `Available temperature stations:\n${JSON.stringify(temperatureStations, null, 2)}`
+        text: `⚠️  DEPRECATED: Use list_snowmobile_conditions instead.\n\nAvailable temperature stations:\n${JSON.stringify(temperatureStations, null, 2)}`
     };
 }
 
 async function list_snow_depth_stations() {
     return {
         type: "text",
-        text: `Available snow depth stations:\n${JSON.stringify(snowDepthStations, null, 2)}`
+        text: `⚠️  DEPRECATED: Use list_snowmobile_conditions instead.\n\nAvailable snow depth stations:\n${JSON.stringify(snowDepthStations, null, 2)}`
     };
 }
 
@@ -725,9 +897,12 @@ const server = {
 
     get_tools() {
         return [
-            // Legacy simple tools
-            { name: "list_temperature_stations", description: "Retrieves a list of predefined temperature monitoring stations from SMHI.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
-            { name: "list_snow_depth_stations", description: "Retrieves a list of predefined snow depth monitoring stations from SMHI.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+            // Snowmobile conditions tool
+            { name: "list_snowmobile_conditions", description: "Lists weather stations relevant for snowmobile conditions, organized by region and showing both temperature and snow depth monitoring capabilities across northern Sweden and mountain regions.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+            
+            // Legacy tools (deprecated but maintained for compatibility)
+            { name: "list_temperature_stations", description: "[DEPRECATED] Use list_snowmobile_conditions instead. Retrieves a list of predefined temperature monitoring stations from SMHI.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+            { name: "list_snow_depth_stations", description: "[DEPRECATED] Use list_snowmobile_conditions instead. Retrieves a list of predefined snow depth monitoring stations from SMHI.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
             { name: "get_station_temperature", description: "Fetches the latest temperature reading for a specific SMHI weather station.", inputSchema: { type: "object", properties: { "station_id": { type: "string" } }, required: ["station_id"] } },
             { name: "get_station_snow_depth", description: "Fetches the latest snow depth reading for a specific SMHI weather station.", inputSchema: { type: "object", properties: { "station_id": { type: "string" } }, required: ["station_id"] } },
             { name: "get_weather_forecast", description: "Retrieves a daily summarized weather forecast for the given coordinates using SMHI data.", inputSchema: { type: "object", properties: { "lat": { type: "number" }, "lon": { type: "number" } }, required: ["lat", "lon"] } },
@@ -779,7 +954,12 @@ const server = {
                 case "tools/call":
                     const { name, arguments: args } = params;
                     switch (name) {
-                        // Legacy simple tools
+                        // Snowmobile conditions tool
+                        case "list_snowmobile_conditions":
+                            result = { content: [await list_snowmobile_conditions()] };
+                            break;
+                            
+                        // Legacy tools (deprecated)
                         case "list_temperature_stations":
                             result = { content: [await list_temperature_stations()] };
                             break;

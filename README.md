@@ -21,14 +21,19 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that p
 
 ## 📋 Available Tools (19 Total)
 
-### Legacy Simple Tools
+### Snowmobile Conditions Tools
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `list_temperature_stations` | List predefined temperature monitoring stations | None |
-| `list_snow_depth_stations` | List predefined snow depth monitoring stations | None |
+| `list_snowmobile_conditions` | List weather stations for snowmobile conditions by region with capability info | None |
 | `get_station_temperature` | Get latest temperature reading from a specific station | `station_id` (string) |
 | `get_station_snow_depth` | Get latest snow depth reading from a specific station | `station_id` (string) |
 | `get_weather_forecast` | Get weather forecast for coordinates | `lat` (number), `lon` (number) |
+
+### Legacy Tools (Deprecated)
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `list_temperature_stations` | [DEPRECATED] Use `list_snowmobile_conditions` instead | None |
+| `list_snow_depth_stations` | [DEPRECATED] Use `list_snowmobile_conditions` instead | None |
 
 ### Multi-Resolution Data Tools
 | Tool | Description | Parameters |
@@ -120,11 +125,24 @@ npm run dev
 }
 ```
 
-### Get Station Temperature
+### List Snowmobile Conditions Stations
 ```json
 {
   "jsonrpc": "2.0",
   "id": 4,
+  "method": "tools/call",
+  "params": {
+    "name": "list_snowmobile_conditions",
+    "arguments": {}
+  }
+}
+```
+
+### Get Station Temperature
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 5,
   "method": "tools/call",
   "params": {
     "name": "get_station_temperature",
@@ -182,14 +200,19 @@ curl -X POST -H "Content-Type: application/json" \
   -d '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}}}' \
   https://smhi-mcp.hakan-3a6.workers.dev
 
+# List snowmobile conditions stations
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_snowmobile_conditions", "arguments": {}}}' \
+  https://smhi-mcp.hakan-3a6.workers.dev
+
 # Test weather forecast for Stockholm
 curl -X POST -H "Content-Type: application/json" \
-  -d '{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "get_weather_forecast", "arguments": {"lat": 59.3293, "lon": 18.0686}}}' \
+  -d '{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "get_weather_forecast", "arguments": {"lat": 59.3293, "lon": 18.0686}}}' \
   https://smhi-mcp.hakan-3a6.workers.dev
 
 # Search for weather stations
 curl -X POST -H "Content-Type: application/json" \
-  -d '{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "search_stations_by_name_multi_param", "arguments": {"query": "Stockholm", "limit": 3}}}' \
+  -d '{"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "search_stations_by_name_multi_param", "arguments": {"query": "Stockholm", "limit": 3}}}' \
   https://smhi-mcp.hakan-3a6.workers.dev
 ```
 
@@ -295,6 +318,11 @@ To use this server with Claude:
 
 Example Claude conversations:
 ```
+You: "Show me weather stations for snowmobile conditions"
+Claude: "Let me get the snowmobile conditions monitoring stations for you."
+[Uses list_snowmobile_conditions]
+Claude: "Here are 18 weather stations organized by region for snowmobile conditions. The Arctic/Mountain region has Katterjåkk/Riksgränsen with both temperature and snow depth data..."
+
 You: "What's the current temperature in Arvidsjaur?"
 Claude: "Let me check the current temperature in Arvidsjaur for you."
 [Uses get_station_temperature with station_id "159880"]
