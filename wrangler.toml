@@ -2,6 +2,11 @@ name = "smhi-mcp"
 main = "worker.js"
 compatibility_date = "2023-12-18"
 
+# R2 configuration for CSV caching
+[[r2_buckets]]
+binding = "HISTORICAL_DATA"
+bucket_name = "smhi-historical-data"
+
 # Environment configuration
 [env.production.vars]
 # Add any public configuration variables here

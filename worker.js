@@ -145,6 +145,19 @@ const snowDepthStations = {
 const METOBS_BASE_URL = "https://opendata-download-metobs.smhi.se/api/version/1.0";
 const METFCST_BASE_URL = "https://opendata-download-metfcst.smhi.se/api/category/pmp3g/version/2";
 
+// Cache TTL settings (in seconds)
+const CACHE_TTL = {
+    current: 900,     // 15 minutes for current data
+    historical: 86400, // 24 hours for historical data
+    metadata: 604800,  // 1 week for station metadata
+    forecast: 1800,    // 30 minutes for forecasts
+    
+    // R2 cache times (in seconds)
+    r2_csv: 86400,     // 24 hours for CSV files
+    r2_recent_csv: 3600, // 1 hour for recent year data
+    r2_old_csv: 604800   // 1 week for data older than 2 years
+};
+
 const SMHIParameter = {
     // Temperature parameters
     AIR_TEMP: "1",              // Hourly temperature
@@ -173,7 +186,124 @@ const SMHIPeriod = {
     LATEST_HOUR: "latest-hour"
 };
 
-async function makeSmhiRequest(url) {
+// Cache utilities for JSON responses
+async function getCachedResponse(cacheKey, ttl) {
+    const cache = caches.default;
+    const fullCacheUrl = `https://cache.smhi-mcp.local/${cacheKey}`;
+    const cachedResponse = await cache.match(fullCacheUrl);
+    
+    if (cachedResponse) {
+        const cacheTime = cachedResponse.headers.get('x-cache-time');
+        if (cacheTime && (Date.now() - parseInt(cacheTime)) < (ttl * 1000)) {
+            return await cachedResponse.json();
+        }
+    }
+    return null;
+}
+
+async function setCachedResponse(cacheKey, data, ttl) {
+    const cache = caches.default;
+    const fullCacheUrl = `https://cache.smhi-mcp.local/${cacheKey}`;
+    const response = new Response(JSON.stringify(data), {
+        headers: {
+            'Content-Type': 'application/json',
+            'x-cache-time': Date.now().toString(),
+            'Cache-Control': `max-age=${ttl}`
+        }
+    });
+    await cache.put(fullCacheUrl, response);
+    return data;
+}
+
+// Determine R2 cache TTL based on data characteristics
+function getR2CacheTTL(station_id, parameter, period, fromDate = null, toDate = null) {
+    // Default TTL
+    let ttl = CACHE_TTL.r2_csv;
+    
+    // For date-filtered requests, check if data is recent or old
+    if (fromDate) {
+        const requestYear = new Date(fromDate).getFullYear();
+        const currentYear = new Date().getFullYear();
+        const yearDiff = currentYear - requestYear;
+        
+        if (yearDiff >= 2) {
+            // Old data rarely changes, cache longer
+            ttl = CACHE_TTL.r2_old_csv;
+        } else if (yearDiff === 0) {
+            // Current year data changes more frequently
+            ttl = CACHE_TTL.r2_recent_csv;
+        }
+    }
+    
+    // Archive period data is more stable than latest periods
+    if (period === 'corrected-archive') {
+        ttl = Math.max(ttl, CACHE_TTL.r2_csv);
+    } else {
+        // Latest periods change more frequently
+        ttl = Math.min(ttl, CACHE_TTL.r2_recent_csv);
+    }
+    
+    return ttl * 1000; // Convert to milliseconds
+}
+
+// R2 utilities for CSV caching
+async function getCachedCSV(station_id, parameter, period, env, fromDate = null, toDate = null) {
+    if (!env?.HISTORICAL_DATA) return null;
+    
+    const key = `csv/${parameter}/${station_id}/${period}.csv`;
+    
+    try {
+        const object = await env.HISTORICAL_DATA.get(key);
+        if (object) {
+            // Get dynamic TTL based on data characteristics
+            const ttlMs = getR2CacheTTL(station_id, parameter, period, fromDate, toDate);
+            
+            const metadata = object.customMetadata;
+            const cacheTime = metadata?.timestamp;
+            if (cacheTime && (Date.now() - parseInt(cacheTime)) < ttlMs) {
+                console.log(`R2 cache HIT: ${key} (TTL: ${ttlMs/1000}s)`);
+                return await object.text();
+            } else {
+                console.log(`R2 cache EXPIRED: ${key} (age: ${cacheTime ? Math.round((Date.now() - parseInt(cacheTime))/1000) : 'unknown'}s)`);
+            }
+        }
+    } catch (e) {
+        // Cache miss or error, continue to fetch from SMHI
+        console.log(`R2 cache MISS: ${key} - ${e.message}`);
+    }
+    return null;
+}
+
+async function setCachedCSV(csvText, station_id, parameter, period, env) {
+    if (!env?.HISTORICAL_DATA || !csvText) return;
+    
+    const key = `csv/${parameter}/${station_id}/${period}.csv`;
+    
+    try {
+        await env.HISTORICAL_DATA.put(key, csvText, {
+            customMetadata: {
+                timestamp: Date.now().toString(),
+                station: station_id,
+                parameter: parameter,
+                period: period,
+                size: csvText.length.toString()
+            }
+        });
+        console.log(`Cached CSV to R2: ${key} (${csvText.length} bytes)`);
+    } catch (e) {
+        console.log(`Failed to cache CSV to R2: ${key}`, e.message);
+    }
+}
+
+async function makeSmhiRequest(url, cacheKey = null, ttl = null) {
+    // Try cache first if caching is enabled
+    if (cacheKey && ttl) {
+        const cachedData = await getCachedResponse(cacheKey, ttl);
+        if (cachedData) {
+            return cachedData;
+        }
+    }
+
     const headers = {
         'accept': 'application/json',
         'referer': 'https://opendata.smhi.se/',
@@ -183,7 +313,15 @@ async function makeSmhiRequest(url) {
     if (!response.ok) {
         throw new Error(`SMHI API request failed: ${response.status} ${response.statusText}`);
     }
-    return response.json();
+    
+    const data = await response.json();
+    
+    // Cache the response if caching is enabled
+    if (cacheKey && ttl) {
+        await setCachedResponse(cacheKey, data, ttl);
+    }
+    
+    return data;
 }
 
 async function list_snowmobile_conditions() {
@@ -258,7 +396,9 @@ async function list_snow_depth_stations() {
 async function get_station_temperature(station_id) {
     try {
         const url = `${METOBS_BASE_URL}/parameter/${SMHIParameter.AIR_TEMP}/station/${station_id}/period/latest-hour/data.json`;
-        const data = await makeSmhiRequest(url);
+        const cacheKey = `temp-${station_id}-latest`;
+        const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.current);
+        
         if (!data.value || data.value.length === 0) {
             return {
                 type: "text",
@@ -283,7 +423,9 @@ async function get_station_temperature(station_id) {
 async function get_station_snow_depth(station_id) {
     try {
         const url = `${METOBS_BASE_URL}/parameter/${SMHIParameter.SNOW_DEPTH}/station/${station_id}/period/latest-day/data.json`;
-        const data = await makeSmhiRequest(url);
+        const cacheKey = `snow-${station_id}-latest`;
+        const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.current);
+        
         if (!data.value || data.value.length === 0) {
             return {
                 type: "text",
@@ -309,16 +451,32 @@ async function get_station_snow_depth(station_id) {
 async function get_weather_forecast(lat, lon) {
     try {
         const url = `${METFCST_BASE_URL}/geotype/point/lon/${lon}/lat/${lat}/data.json`;
-        const data = await makeSmhiRequest(url);
+        const cacheKey = `forecast-${lat}-${lon}`;
+        const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.forecast);
         
-        const summary = data.timeSeries.slice(0, 5).map(entry => {
+        const summary = data.timeSeries.slice(0, 8).map(entry => {
             const params = Object.fromEntries(entry.parameters.map(p => [p.name, p.values[0]]));
-            return `Time: ${entry.validTime}, Temp: ${params.t}°C, Precip: ${params.pmean} mm/h`;
-        }).join('\n');
+            
+            // Format wind direction
+            const windDir = params.wd ? `${Math.round(params.wd)}°` : 'N/A';
+            
+            // Format weather symbol to readable description
+            const weatherSymbol = params.Wsymb2 || 0;
+            const weatherDesc = getWeatherDescription(weatherSymbol);
+            
+            // Format cloud cover
+            const cloudCover = params.tcc_mean !== undefined ? `${params.tcc_mean}/8` : 'N/A';
+            
+            return `${entry.validTime}\n` +
+                   `  🌡️  ${params.t}°C  💧 ${params.pmean || 0} mm/h  💨 ${Math.round(params.ws || 0)} m/s ${windDir}\n` +
+                   `  ☁️  ${cloudCover}  👁️  ${Math.round(params.vis || 0)} km  🌧️  ${Math.round(params.r || 0)}%\n` +
+                   `  ${weatherDesc}`;
+        }).join('\n\n');
 
         return {
             type: "text",
-            text: `Weather forecast for coordinates (${lat}, ${lon}):\n\n${summary}`
+            text: `🌤️ Weather Forecast for ${lat}°N, ${lon}°E\n\n${summary}\n\n` +
+                   `Legend: 🌡️Temp 💧Precip 💨Wind ☁️Clouds 👁️Visibility 🌧️Humidity`
         };
     } catch (e) {
         return {
@@ -328,10 +486,45 @@ async function get_weather_forecast(lat, lon) {
     }
 }
 
+// Convert SMHI weather symbol to description
+function getWeatherDescription(symbol) {
+    const descriptions = {
+        1: "☀️ Clear sky",
+        2: "🌤️ Nearly clear sky", 
+        3: "🌤️ Variable cloudiness",
+        4: "🌥️ Halfclear sky",
+        5: "☁️ Cloudy sky",
+        6: "☁️ Overcast",
+        7: "🌫️ Fog",
+        8: "🌦️ Light rain showers",
+        9: "🌧️ Moderate rain showers", 
+        10: "🌧️ Heavy rain showers",
+        11: "⛈️ Thunderstorm",
+        12: "🌨️ Light sleet showers",
+        13: "🌨️ Moderate sleet showers",
+        14: "🌨️ Heavy sleet showers", 
+        15: "❄️ Light snow showers",
+        16: "❄️ Moderate snow showers",
+        17: "❄️ Heavy snow showers",
+        18: "🌧️ Light rain",
+        19: "🌧️ Moderate rain",
+        20: "🌧️ Heavy rain",
+        21: "⛈️ Thunder",
+        22: "🌨️ Light sleet",
+        23: "🌨️ Moderate sleet", 
+        24: "🌨️ Heavy sleet",
+        25: "❄️ Light snowfall",
+        26: "❄️ Moderate snowfall",
+        27: "❄️ Heavy snowfall"
+    };
+    return descriptions[symbol] || `Weather code ${symbol}`;
+}
+
 async function get_station_precipitation(station_id, parameter = SMHIParameter.DAILY_PRECIP, period = SMHIPeriod.LATEST_DAY) {
     try {
         const url = `${METOBS_BASE_URL}/parameter/${parameter}/station/${station_id}/period/${period}/data.json`;
-        const data = await makeSmhiRequest(url);
+        const cacheKey = `precip-${station_id}-${parameter}-${period}`;
+        const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.current);
         
         if (!data.value || data.value.length === 0) {
             return {
@@ -367,7 +560,8 @@ async function get_station_precipitation(station_id, parameter = SMHIParameter.D
 async function get_temperature_multi_resolution(station_id, parameter = SMHIParameter.AIR_TEMP, period = SMHIPeriod.LATEST_HOUR) {
     try {
         const url = `${METOBS_BASE_URL}/parameter/${parameter}/station/${station_id}/period/${period}/data.json`;
-        const data = await makeSmhiRequest(url);
+        const cacheKey = `temp-multi-${station_id}-${parameter}-${period}`;
+        const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.current);
         
         if (!data.value || data.value.length === 0) {
             return {
@@ -404,7 +598,8 @@ async function get_temperature_multi_resolution(station_id, parameter = SMHIPara
 async function get_station_metadata(station_id, parameter) {
     try {
         const url = `${METOBS_BASE_URL}/parameter/${parameter}/station/${station_id}.json`;
-        const data = await makeSmhiRequest(url);
+        const cacheKey = `metadata-${station_id}-${parameter}`;
+        const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.metadata);
         
         // Extract station name from title (format: "Parameter - StationName: ...")
         let stationName = data.name || 'Unknown';
@@ -445,14 +640,15 @@ async function get_station_metadata(station_id, parameter) {
     }
 }
 
-async function get_historical_data(station_id, parameter, period, limit = 10, cursor = null, reverse = true, fromDate = null, toDate = null) {
+async function get_historical_data(station_id, parameter, period, limit = 10, cursor = null, reverse = true, fromDate = null, toDate = null, env = null) {
     try {
-        // First get metadata to find CSV download URL
+        // First get metadata to find CSV download URL (cache metadata)
         const metadataUrl = `${METOBS_BASE_URL}/parameter/${parameter}/station/${station_id}/period/${period}.json`;
+        const metadataCacheKey = `hist-meta-${station_id}-${parameter}-${period}`;
         let metadata;
         
         try {
-            metadata = await makeSmhiRequest(metadataUrl);
+            metadata = await makeSmhiRequest(metadataUrl, metadataCacheKey, CACHE_TTL.metadata);
         } catch (e) {
             // If the specific parameter/period combination fails, check what's available for this station
             try {
@@ -492,20 +688,28 @@ async function get_historical_data(station_id, parameter, period, limit = 10, cu
             };
         }
         
-        // Download and parse CSV data
-        const csvResponse = await fetch(csvLink.href, {
-            headers: {
-                'accept': 'text/csv',
-                'referer': 'https://opendata.smhi.se/',
-                'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)'
+        // Try R2 cache first for CSV data
+        let csvText = await getCachedCSV(station_id, parameter, period, env, fromDate, toDate);
+        
+        if (!csvText) {
+            // Download CSV data from SMHI
+            const csvResponse = await fetch(csvLink.href, {
+                headers: {
+                    'accept': 'text/csv',
+                    'referer': 'https://opendata.smhi.se/',
+                    'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)'
+                }
+            });
+            
+            if (!csvResponse.ok) {
+                throw new Error(`CSV download failed: ${csvResponse.status} ${csvResponse.statusText}`);
             }
-        });
-        
-        if (!csvResponse.ok) {
-            throw new Error(`CSV download failed: ${csvResponse.status} ${csvResponse.statusText}`);
+            
+            csvText = await csvResponse.text();
+            
+            // Cache the CSV in R2 for future requests
+            await setCachedCSV(csvText, station_id, parameter, period, env);
         }
-        
-        const csvText = await csvResponse.text();
         const lines = csvText.trim().split('\n');
         
         if (lines.length < 2) {
@@ -764,7 +968,8 @@ async function search_stations_by_name_multi_param(query, limit = 10, threshold 
         for (const parameter of parameters) {
             try {
                 const url = `${METOBS_BASE_URL}/parameter/${parameter}.json`;
-                const data = await makeSmhiRequest(url);
+                const cacheKey = `stations-${parameter}`;
+                const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.metadata);
                 const stations = data.station || [];
                 
                 const normalizedQuery = normalizeSwedish(query);
@@ -886,7 +1091,8 @@ async function search_stations_by_name_multi_param(query, limit = 10, threshold 
 async function search_stations_by_name(query, parameter = SMHIParameter.AIR_TEMP, limit = 10, threshold = 0.3) {
     try {
         const url = `${METOBS_BASE_URL}/parameter/${parameter}.json`;
-        const data = await makeSmhiRequest(url);
+        const cacheKey = `stations-${parameter}`;
+        const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.metadata);
         const stations = data.station || [];
 
         if (stations.length === 0) {
@@ -987,7 +1193,8 @@ async function search_stations_by_name(query, parameter = SMHIParameter.AIR_TEMP
 async function list_all_stations_for_parameter(parameter, cursor) {
     try {
         const url = `${METOBS_BASE_URL}/parameter/${parameter}.json`;
-        const data = await makeSmhiRequest(url);
+        const cacheKey = `stations-${parameter}`;
+        const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.metadata);
         const stations = data.station || [];
 
         const offset = cursor ? parseInt(atob(cursor), 10) : 0;
@@ -1029,6 +1236,7 @@ async function list_all_stations_for_parameter(parameter, cursor) {
 const server = {
     name: "smhi-mcp",
     version: "1.0.0",
+    env: null, // Will be set in fetch handler
 
     get_tools() {
         return [
@@ -1122,7 +1330,7 @@ const server = {
                             result = { content: [await get_station_metadata(args.station_id, args.parameter)] };
                             break;
                         case "get_historical_data":
-                            result = { content: [await get_historical_data(args.station_id, args.parameter, args.period, args.limit, args.cursor, args.reverse, args.fromDate, args.toDate)] };
+                            result = { content: [await get_historical_data(args.station_id, args.parameter, args.period, args.limit, args.cursor, args.reverse, args.fromDate, args.toDate, this.env)] };
                             break;
                         
                         // Station listing tools
@@ -1155,18 +1363,65 @@ const server = {
     }
 };
 
+// Request counting for free tier limits
+async function checkRequestLimits() {
+    const cache = caches.default;
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const countKey = `https://cache.smhi-mcp.local/daily-requests-${today}`;
+    
+    let response = await cache.match(countKey);
+    let count = 0;
+    
+    if (response) {
+        const data = await response.json();
+        count = data.count || 0;
+    }
+    
+    // Check if approaching limit (95% of 100k free tier)
+    if (count >= 95000) {
+        throw new Error('Daily request limit reached. Service temporarily unavailable.');
+    }
+    
+    // Increment counter
+    count++;
+    const newResponse = new Response(JSON.stringify({ count }), {
+        headers: {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'max-age=86400' // 24 hours
+        }
+    });
+    await cache.put(countKey, newResponse);
+    
+    return count;
+}
+
 export default {
     async fetch(request, env, ctx) {
         if (request.method !== 'POST') {
             return new Response('Expected POST', { status: 405 });
         }
+        
         try {
+            // Check request limits (only for non-OPTIONS requests)
+            await checkRequestLimits();
+            
+            // Set env for R2 access
+            server.env = env;
+            
             const body = await request.json();
             const response = await server.handle_request(body);
             return new Response(JSON.stringify(response), {
                 headers: { 'Content-Type': 'application/json' },
             });
         } catch (e) {
+            if (e.message.includes('Daily request limit')) {
+                return new Response(JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: null,
+                    error: { code: -32603, message: e.message }
+                }), { status: 429, headers: { 'Content-Type': 'application/json' } });
+            }
+            
             return new Response(JSON.stringify({
                 jsonrpc: "2.0",
                 id: null,
