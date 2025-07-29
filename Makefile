@@ -4,16 +4,21 @@
 help:
 	@echo "SMHI MCP Worker - Available targets:"
 	@echo ""
-	@echo "  install    - Install dependencies"
-	@echo "  dev        - Start local development server"
-	@echo "  deploy     - Deploy worker to Cloudflare"
-	@echo "  test       - Run tests (if available)"
-	@echo "  clean      - Clean node_modules and package-lock"
-	@echo "  logs       - Tail worker logs"
-	@echo "  status     - Show worker deployment status"
-	@echo "  secrets    - Set up required secrets interactively"
-	@echo "  env        - Show environment configuration"
-	@echo "  update     - Update wrangler to latest version"
+	@echo "  install       - Install dependencies"
+	@echo "  dev           - Start local development server"
+	@echo "  deploy        - Deploy worker to Cloudflare"
+	@echo "  test          - Run tests (if available)"
+	@echo "  test-all      - Run comprehensive test suite for all 15 tools"
+	@echo "  test-detailed - Run detailed tests with sample responses"
+	@echo "  test-baseline - Create pre-refactoring baseline (run BEFORE changes)"
+	@echo "  test-validate - Validate post-refactoring (run AFTER changes)"
+	@echo "  test-mcp      - Test basic MCP protocol endpoints"
+	@echo "  clean         - Clean node_modules and package-lock"
+	@echo "  logs          - Tail worker logs"
+	@echo "  status        - Show worker deployment status"
+	@echo "  secrets       - Set up required secrets interactively"
+	@echo "  env           - Show environment configuration"
+	@echo "  update        - Update wrangler to latest version"
 	@echo ""
 	@echo "Quick commands:"
 	@echo "  make install && make deploy"
@@ -50,7 +55,7 @@ logs:
 # Show deployment status
 status:
 	@echo "SMHI MCP Worker Status:"
-	@echo "URL: https://smhi-mcp.your-subdomain.workers.dev"
+	@echo "URL: https://smhi-mcp.hakan-3a6.workers.dev"
 	@echo ""
 	@wrangler deployments list --name smhi-mcp 2>/dev/null || echo "Run 'make deploy' first"
 
@@ -67,6 +72,8 @@ secrets:
 env:
 	@echo "Current Environment Configuration:"
 	@echo "=================================="
+	@echo ""
+	@echo "Deployed URL: https://smhi-mcp.hakan-3a6.workers.dev"
 	@echo ""
 	@echo "From wrangler.toml:"
 	@grep -A 10 "^\[" wrangler.toml 2>/dev/null || echo "No wrangler.toml found"
@@ -97,14 +104,14 @@ test-mcp:
 	@echo "Testing MCP initialize..."
 	@curl -s -X POST \
 		-H "Content-Type: application/json" \
-		-d '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}}}' \
-		https://smhi-mcp.your-subdomain.workers.dev | jq . || echo "Failed or no jq installed"
+		-d '{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}}}' \
+		https://smhi-mcp.hakan-3a6.workers.dev | jq . || echo "Failed or no jq installed"
 	@echo ""
 	@echo "Testing tools/list..."
 	@curl -s -X POST \
 		-H "Content-Type: application/json" \
-		-d '{"jsonrpc": "2.0", "id": 2, "method": "tools/list"}' \
-		https://smhi-mcp.your-subdomain.workers.dev | jq . || echo "Failed or no jq installed"
+		-d '{"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}' \
+		https://smhi-mcp.hakan-3a6.workers.dev | jq . || echo "Failed or no jq installed"
 
 # Test weather forecast (Stockholm coordinates)
 test-forecast:
@@ -112,7 +119,7 @@ test-forecast:
 	@curl -s -X POST \
 		-H "Content-Type: application/json" \
 		-d '{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "get_weather_forecast", "arguments": {"lat": 59.3293, "lon": 18.0686}}}' \
-		https://smhi-mcp.your-subdomain.workers.dev | jq . || echo "Failed or no jq installed"
+		https://smhi-mcp.hakan-3a6.workers.dev | jq . || echo "Failed or no jq installed"
 
 # Test temperature stations
 test-stations:
@@ -122,10 +129,25 @@ test-stations:
 		-d '{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "list_temperature_stations", "arguments": {}}}' \
 		https://smhi-mcp.hakan-3a6.workers.dev | jq . || echo "Failed or no jq installed"
 
-# Run comprehensive test suite
+# Run comprehensive test suite  
 test-all:
 	@echo "Running comprehensive SMHI MCP test suite..."
-	@node test-mcp.js
+	@./test-all-tools.sh
+
+# Run detailed test with sample responses
+test-detailed:
+	@echo "Running detailed SMHI MCP test with sample responses..."
+	@./test-detailed.sh
+
+# Create baseline before refactoring (run this BEFORE making changes)
+test-baseline:
+	@echo "Creating pre-refactoring baseline..."
+	@node test-pre-refactor.js
+
+# Validate after refactoring (run this AFTER modular changes)
+test-validate:
+	@echo "Validating post-refactoring behavior..."
+	@node test-post-refactor.js
 
 # Test pagination functionality
 test-pagination:

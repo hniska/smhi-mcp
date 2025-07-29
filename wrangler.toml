@@ -14,3 +14,7 @@ bucket_name = "smhi-historical-data"
 # Optional: Uncomment if you want to add authentication
 # [[env.production.secrets]]
 # API_KEY = ""
+
+# wrangler.toml (wrangler v3.88.0^)
+[observability.logs]
+enabled = true
