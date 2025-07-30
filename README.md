@@ -55,8 +55,19 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that p
 ### Station Search Tools
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `search_stations_by_name` | Search stations by name within a specific parameter type | `query`, `parameter` (1=temp, 5=precip, 8=snow), `limit`, `threshold` |
-| `search_stations_by_name_multi_param` | Search stations by name across all parameter types | `query`, `limit`, `threshold` |
+| `search_stations_by_name` | Search stations by name within a specific parameter type | `query`, `parameter` (1=temp, 5=precip, 8=snow), `limit`, `threshold`, `active_only` |
+| `search_stations_by_name_multi_param` | Search stations by name across all parameter types | `query`, `limit`, `threshold`, `active_only` |
+
+#### Search Parameters Details
+- **`query`** (required): Station name to search for (fuzzy matching)
+- **`parameter`** (search_stations_by_name only): Parameter type filter
+  - `1` = Temperature stations
+  - `5` = Daily precipitation stations  
+  - `7` = Hourly precipitation stations
+  - `8` = Snow depth stations
+- **`limit`** (optional, default: 10): Maximum number of results to return
+- **`threshold`** (optional, default: 0.3): Minimum similarity score (0.0-1.0) for fuzzy matching
+- **`active_only`** (optional, default: true): Only return stations with recent data activity
 
 ## 🛠️ Quick Start
 
@@ -169,7 +180,8 @@ npm run dev
     "arguments": {
       "query": "Stockholm",
       "limit": 5,
-      "threshold": 0.3
+      "threshold": 0.3,
+      "active_only": true
     }
   }
 }
@@ -293,6 +305,8 @@ All weather data comes from [SMHI (Swedish Meteorological and Hydrological Insti
 | 188850 | Katterjåkk/Riksgränsen | Arctic region | Northernmost station |
 
 **Note**: Some stations have different names depending on the parameter type. Use `search_stations_by_name_multi_param` to find stations across all data types.
+
+**Active Filtering**: By default, search tools only return stations with recent data activity. Set `active_only: false` to include all stations, including inactive ones.
 
 ## 🔧 Configuration
 
