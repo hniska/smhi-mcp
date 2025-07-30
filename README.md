@@ -14,6 +14,8 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that p
 - **MCP Protocol**: Full compatibility with Claude and other MCP clients
 - **Serverless**: Runs on Cloudflare Workers with global edge deployment
 - **No API Keys Required**: Uses SMHI's free open data APIs
+- **Smart Caching**: Multi-level caching with Cloudflare Cache API and R2 storage for optimal performance
+- **Rate Limiting**: Built-in request rate limiting to respect SMHI API limits
 
 ## 🚀 Live Demo
 
@@ -71,6 +73,9 @@ cd smhi-mcp
 
 # Install dependencies
 npm install
+
+# Create R2 bucket for caching (required)
+wrangler r2 bucket create smhi-historical-data
 
 # Deploy to Cloudflare Workers
 npm run deploy
@@ -242,6 +247,33 @@ The server acts as a bridge between MCP clients and SMHI's weather APIs:
 3. **SMHI APIs** provide real-time weather data
 4. **Worker** formats response according to MCP protocol
 
+## ⚡ Performance & Caching
+
+The server implements a multi-level caching strategy for optimal performance:
+
+### Cloudflare Cache API
+- **Current weather data**: 15 minutes TTL
+- **Weather forecasts**: 30 minutes TTL  
+- **Station metadata**: 1 week TTL
+- **Historical data**: 24 hours TTL
+
+### R2 Storage (CSV Data)
+- **Standard CSV files**: 24 hours TTL
+- **Recent year data**: 1 hour TTL (more volatile)
+- **Historical data (>2 years)**: 1 week TTL (stable)
+
+### Rate Limiting
+- **30 requests per minute** maximum to respect SMHI API limits
+- Automatic request throttling with user-friendly error messages
+
+### Configuration Requirements
+```toml
+# wrangler.toml - R2 bucket for CSV caching
+[[r2_buckets]]
+binding = "HISTORICAL_DATA"
+bucket_name = "smhi-historical-data"
+```
+
 ## 📊 Data Sources
 
 All weather data comes from [SMHI (Swedish Meteorological and Hydrological Institute)](https://www.smhi.se/):
@@ -264,12 +296,21 @@ All weather data comes from [SMHI (Swedish Meteorological and Hydrological Insti
 
 ## 🔧 Configuration
 
-### Environment Variables
+### Required Configuration
 
-The worker can be configured with these optional environment variables:
+The worker requires an R2 bucket for CSV caching:
 
 ```toml
-# wrangler.toml
+# wrangler.toml - Required R2 configuration
+[[r2_buckets]]
+binding = "HISTORICAL_DATA" 
+bucket_name = "smhi-historical-data"
+```
+
+### Optional Environment Variables
+
+```toml
+# wrangler.toml - Optional configuration
 [env.production.vars]
 # Add public configuration here
 
@@ -306,6 +347,23 @@ make status
 
 # Run tests
 make test-mcp
+```
+
+### Modular Architecture
+
+The codebase has been refactored into a modular structure:
+
+```
+src/
+├── api/          # SMHI API integration
+├── config/       # Constants and configuration
+├── data/         # Station data and presets
+├── handlers/     # WebSocket and SSE handlers
+├── mcp/          # MCP protocol server
+├── middleware/   # Rate limiting and middleware
+├── services/     # Weather data services
+├── tools/        # MCP tool definitions
+└── utils/        # Caching and utility functions
 ```
 
 ## 🌍 Claude Integration
