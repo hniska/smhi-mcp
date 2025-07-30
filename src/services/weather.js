@@ -181,36 +181,38 @@ export async function get_weather_forecast(lat, lon, fromDate = null, toDate = n
         const maxLimit = Math.min(limit || 8, 100);
         const limitedTimeSeries = filteredTimeSeries.slice(0, maxLimit);
         
-        const summary = limitedTimeSeries.map(entry => {
+        const forecastData = limitedTimeSeries.map(entry => {
             const params = Object.fromEntries(entry.parameters.map(p => [p.name, p.values[0]]));
             
-            // Format wind direction
-            const windDir = params.wd ? `${Math.round(params.wd)}°` : 'N/A';
-            
-            // Format weather symbol to readable description
-            const weatherSymbol = params.Wsymb2 || 0;
-            const weatherDesc = getWeatherDescription(weatherSymbol);
-            
-            // Format cloud cover
-            const cloudCover = params.tcc_mean !== undefined ? `${params.tcc_mean}/8` : 'N/A';
-            
-            return `${entry.validTime}\n` +
-                   `  🌡️  ${params.t}°C  💧 ${params.pmean || 0} mm/h  💨 ${Math.round(params.ws || 0)} m/s ${windDir}\n` +
-                   `  ☁️  ${cloudCover}  👁️  ${Math.round(params.vis || 0)} km  🌧️  ${Math.round(params.r || 0)}%\n` +
-                   `  ${weatherDesc}`;
-        }).join('\n\n');
+            return {
+                validTime: entry.validTime,
+                temperature: params.t || null,
+                precipitation: params.pmean || 0,
+                windSpeed: params.ws || 0,
+                windDirection: params.wd || null,
+                cloudCover: params.tcc_mean || null,
+                visibility: params.vis || null,
+                humidity: params.r || null,
+                weatherSymbol: params.Wsymb2 || 0,
+                weatherDescription: getWeatherDescription(params.Wsymb2 || 0)
+            };
+        });
 
-        let filterInfo = '';
-        if (fromDateStr || toDateStr) {
-            filterInfo = `\nFiltered: ${fromDateStr || 'start'} to ${toDateStr || 'end'}`;
-        }
-        
-        const periodInfo = `\nShowing ${limitedTimeSeries.length} of ${filteredTimeSeries.length} forecast periods`;
-        
         return {
             type: "text",
-            text: `🌤️ Weather Forecast for ${lat}°N, ${lon}°E${filterInfo}${periodInfo}\n\n${summary}\n\n` +
-                   `Legend: 🌡️Temp 💧Precip 💨Wind ☁️Clouds 👁️Visibility 🌧️Humidity`
+            text: JSON.stringify({
+                location: {
+                    latitude: lat,
+                    longitude: lon
+                },
+                forecast: forecastData,
+                meta: {
+                    totalPeriods: filteredTimeSeries.length,
+                    returnedPeriods: limitedTimeSeries.length,
+                    fromDate: fromDateStr,
+                    toDate: toDateStr
+                }
+            }, null, 2)
         };
     } catch (e) {
         return {
