@@ -11,14 +11,14 @@ export async function get_station_temperature(station_id) {
         // First try latest-hour data
         let url = `${METOBS_BASE_URL}/parameter/${SMHIParameter.AIR_TEMP}/station/${station_id}/period/latest-hour/data.json`;
         let cacheKey = `temp-${station_id}-latest-hour`;
-        let data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.LATEST_DATA);
-        
+        let data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.current);
+
         // If no hourly data, try latest-day
         if (!data.value || data.value.length === 0) {
             console.log(`No hourly data for station ${station_id}, trying daily data`);
             url = `${METOBS_BASE_URL}/parameter/${SMHIParameter.AIR_TEMP}/station/${station_id}/period/latest-day/data.json`;
             cacheKey = `temp-${station_id}-latest-day`;
-            data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.LATEST_DATA);
+            data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.current);
         }
         
         // If still no data, return error
@@ -49,10 +49,20 @@ export async function get_station_temperature(station_id) {
  */
 export async function get_station_snow_depth(station_id) {
     try {
-        const url = `${METOBS_BASE_URL}/parameter/${SMHIParameter.SNOW_DEPTH}/station/${station_id}/period/latest-day/data.json`;
-        const cacheKey = `snow-${station_id}-latest`;
-        const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.current);
-        
+        // First try latest-day data
+        let url = `${METOBS_BASE_URL}/parameter/${SMHIParameter.SNOW_DEPTH}/station/${station_id}/period/latest-day/data.json`;
+        let cacheKey = `snow-${station_id}-latest-day`;
+        let data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.current);
+
+        // If no daily data, try latest-months
+        if (!data.value || data.value.length === 0) {
+            console.log(`No daily snow depth data for station ${station_id}, trying latest-months`);
+            url = `${METOBS_BASE_URL}/parameter/${SMHIParameter.SNOW_DEPTH}/station/${station_id}/period/latest-months/data.json`;
+            cacheKey = `snow-${station_id}-latest-months`;
+            data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.current);
+        }
+
+        // If still no data, return error
         if (!data.value || data.value.length === 0) {
             return {
                 type: "text",
@@ -89,85 +99,49 @@ export async function get_weather_forecast(lat, lon, fromDate = null, toDate = n
         const cacheKey = `forecast-${lat}-${lon}`;
         const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.forecast);
         
-        // Apply time filtering if specified (skip if dates are invalid objects)
+        // Apply time filtering if specified
         let filteredTimeSeries = data.timeSeries;
-        
-        // Debug: log the actual parameter types and values
-        console.log('fromDate type:', typeof fromDate, 'value:', fromDate);
-        console.log('toDate type:', typeof toDate, 'value:', toDate);
-        
-        // Convert dates to strings and validate
-        let fromDateStr = null;
-        let toDateStr = null;
-        
-        // Handle Date objects specifically
-        if (fromDate) {
-            if (fromDate instanceof Date) {
-                fromDateStr = fromDate.toISOString().split('T')[0]; // Convert to YYYY-MM-DD
-            } else if (typeof fromDate === 'object' && fromDate.toString) {
-                // Try to extract date from object
-                const objStr = fromDate.toString();
-                if (objStr.match(/^\d{4}-\d{2}-\d{2}/)) {
-                    fromDateStr = objStr.split('T')[0];
-                } else {
-                    fromDateStr = String(fromDate);
-                }
-            } else {
-                fromDateStr = String(fromDate);
+
+        // Helper to parse date string to timestamp
+        const parseDate = (dateInput, endOfDay = false) => {
+            if (!dateInput) return null;
+
+            // Convert to string if needed
+            const dateStr = dateInput instanceof Date
+                ? dateInput.toISOString()
+                : String(dateInput);
+
+            // Skip invalid values
+            if (!dateStr || dateStr === 'null' || dateStr === 'undefined') return null;
+
+            // If date-only format (YYYY-MM-DD), adjust for start/end of day
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                const suffix = endOfDay ? 'T23:59:59Z' : 'T00:00:00Z';
+                return new Date(dateStr + suffix).getTime();
             }
+
+            const timestamp = new Date(dateStr).getTime();
+            return isNaN(timestamp) ? null : timestamp;
+        };
+
+        const fromTimestamp = parseDate(fromDate, false);
+        const toTimestamp = parseDate(toDate, true);
+
+        if (fromTimestamp) {
+            filteredTimeSeries = filteredTimeSeries.filter(entry =>
+                new Date(entry.validTime).getTime() >= fromTimestamp
+            );
         }
-        
-        if (toDate) {
-            if (toDate instanceof Date) {
-                toDateStr = toDate.toISOString().split('T')[0]; // Convert to YYYY-MM-DD
-            } else if (typeof toDate === 'object' && toDate.toString) {
-                // Try to extract date from object
-                const objStr = toDate.toString();
-                if (objStr.match(/^\d{4}-\d{2}-\d{2}/)) {
-                    toDateStr = objStr.split('T')[0];
-                } else {
-                    toDateStr = String(toDate);
-                }
-            } else {
-                toDateStr = String(toDate);
-            }
+
+        if (toTimestamp) {
+            filteredTimeSeries = filteredTimeSeries.filter(entry =>
+                new Date(entry.validTime).getTime() <= toTimestamp
+            );
         }
-        
-        if (fromDateStr && fromDateStr !== 'null' && fromDateStr !== 'undefined' && fromDateStr.length > 0) {
-            let fromTimestamp;
-            // If date-only format (YYYY-MM-DD), set to start of day
-            if (/^\d{4}-\d{2}-\d{2}$/.test(fromDateStr)) {
-                fromTimestamp = new Date(fromDateStr + 'T00:00:00Z').getTime();
-            } else {
-                fromTimestamp = new Date(fromDateStr).getTime();
-            }
-            
-            // Skip filtering if invalid date
-            if (!isNaN(fromTimestamp)) {
-                filteredTimeSeries = filteredTimeSeries.filter(entry => {
-                    const entryTimestamp = new Date(entry.validTime).getTime();
-                    return entryTimestamp >= fromTimestamp;
-                });
-            }
-        }
-        
-        if (toDateStr && toDateStr !== 'null' && toDateStr !== 'undefined' && toDateStr.length > 0) {
-            let toTimestamp;
-            // If date-only format (YYYY-MM-DD), set to end of day
-            if (/^\d{4}-\d{2}-\d{2}$/.test(toDateStr)) {
-                toTimestamp = new Date(toDateStr + 'T23:59:59Z').getTime();
-            } else {
-                toTimestamp = new Date(toDateStr).getTime();
-            }
-            
-            // Skip filtering if invalid date
-            if (!isNaN(toTimestamp)) {
-                filteredTimeSeries = filteredTimeSeries.filter(entry => {
-                    const entryTimestamp = new Date(entry.validTime).getTime();
-                    return entryTimestamp <= toTimestamp;
-                });
-            }
-        }
+
+        // Normalize date strings for response metadata
+        const fromDateStr = fromDate ? String(fromDate) : null;
+        const toDateStr = toDate ? String(toDate) : null;
         
         // If no valid time series after filtering, show basic error without showing malformed dates
         if (filteredTimeSeries.length === 0) {

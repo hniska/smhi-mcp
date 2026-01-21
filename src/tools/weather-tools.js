@@ -1,8 +1,10 @@
 // Weather tool implementations for SMHI MCP server
 import { SMHIParameter, SMHIPeriod, CACHE_TTL, METOBS_BASE_URL } from '../config/constants.js';
 import { getCachedResponse, setCachedResponse, getCachedCSV, setCachedCSV } from '../utils/cache.js';
-import { levenshteinDistance, calculateSimilarity, normalizeSwedish } from '../utils/string.js';
 import { makeSmhiRequest } from '../api/smhi.js';
+import { getParameterDescription, getParameterUnit, getParameterName, createErrorResponse } from '../utils/parameters.js';
+import { searchStationsByParameter, searchStationsMultiParameter } from '../utils/search.js';
+import { listAllStationsForParameter } from '../utils/stations.js';
 import { snowmobileConditionsStations, temperatureStations, snowDepthStations } from '../data/stations.js';
 
 export async function list_snowmobile_conditions() {
@@ -89,25 +91,15 @@ export async function get_station_precipitation(station_id, env, parameter = SMH
         
         const latestValue = data.value[data.value.length - 1];
         
-        // Map parameter codes to descriptions
-        const parameterDescriptions = {
-            [SMHIParameter.DAILY_PRECIP]: "daily precipitation",
-            [SMHIParameter.HOURLY_PRECIP]: "hourly precipitation", 
-            [SMHIParameter.PRECIPITATION_15MIN]: "15-minute precipitation",
-            [SMHIParameter.MONTHLY_PRECIP]: "monthly precipitation"
-        };
-        
-        const description = parameterDescriptions[parameter] || `parameter ${parameter}`;
+        const description = getParameterDescription(parameter);
+        const unit = getParameterUnit(parameter);
         
         return {
             type: "text",
-            text: `Station ${data.station.name} (${station_id}): ${latestValue.value}mm ${description} at ${latestValue.date}`
+            text: `Station ${data.station.name} (${station_id}): ${latestValue.value}${unit} ${description} at ${latestValue.date}`
         };
     } catch (error) {
-        return {
-            type: "text",
-            text: `Error fetching precipitation data for station ${station_id}: ${error.message}`
-        };
+        return createErrorResponse(error.message, { station_id, parameter, operation: 'fetching precipitation data' });
     }
 }
 
@@ -126,26 +118,15 @@ export async function get_temperature_multi_resolution(station_id, env, paramete
         
         const latestValue = data.value[data.value.length - 1];
         
-        // Map parameter codes to descriptions
-        const parameterDescriptions = {
-            [SMHIParameter.AIR_TEMP]: "hourly temperature",
-            [SMHIParameter.DAILY_TEMP_MEAN]: "daily mean temperature",
-            [SMHIParameter.DAILY_TEMP_MIN]: "daily minimum temperature", 
-            [SMHIParameter.DAILY_TEMP_MAX]: "daily maximum temperature",
-            [SMHIParameter.MONTHLY_TEMP]: "monthly temperature"
-        };
-        
-        const description = parameterDescriptions[parameter] || `parameter ${parameter}`;
+        const description = getParameterDescription(parameter);
+        const unit = getParameterUnit(parameter);
         
         return {
             type: "text",
-            text: `Station ${data.station.name} (${station_id}): ${latestValue.value}°C ${description} at ${latestValue.date}`
+            text: `Station ${data.station.name} (${station_id}): ${latestValue.value}${unit} ${description} at ${latestValue.date}`
         };
     } catch (error) {
-        return {
-            type: "text",
-            text: `Error fetching temperature data for station ${station_id}: ${error.message}`
-        };
+        return createErrorResponse(error.message, { station_id, parameter, operation: 'fetching temperature data' });
     }
 }
 
@@ -155,30 +136,39 @@ export async function get_station_metadata(station_id, parameter) {
         const cacheKey = `metadata-${station_id}-${parameter}`;
         const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.metadata);
         
-        const periods = data.period?.map(p => ({
-            key: p.key,
-            from: p.from,
-            to: p.to,
-            summary: p.summary
-        })) || [];
+        // Extract station name from title (format: "Parameter - StationName: ...")
+        const stationName = data.title?.split(' - ')[1]?.split(':')[0] || 'Unknown';
+        
+        // Get latest position data (last entry in position array)
+        const position = data.position?.[data.position.length - 1] || {};
+        
+        // Format periods with proper date formatting
+        const periods = data.period?.map(p => {
+            // Use main data from/to dates for periods since periods don't have their own dates
+            const fromDate = data.from ? new Date(data.from).toISOString().split('T')[0] : 'N/A';
+            const toDate = data.to ? new Date(data.to).toISOString().split('T')[0] : 'N/A';
+            return {
+                key: p.key,
+                from: fromDate,
+                to: toDate,
+                summary: p.summary || p.title || ''
+            };
+        }) || [];
         
         return {
             type: "text",
-            text: `📊 Station Metadata\n\n` +
-                   `🏷️  ID: ${data.id}\n` +
-                   `📍 Name: ${data.name}\n` +
-                   `🔢 Parameter: ${parameter}\n` +
-                   `🌍 Position: ${data.latitude}°N, ${data.longitude}°E\n` +
-                   `📏 Height: ${data.height}m\n` +
-                   `🏢 Owner: ${data.owner}\n\n` +
-                   `📅 Available Periods:\n` +
+            text: `Station Metadata\n\n` +
+                   `ID: ${data.key}\n` +
+                   `Name: ${stationName}\n` +
+                   `Parameter: ${parameter}\n` +
+                   `Position: ${position.latitude?.toFixed(4)}°N, ${position.longitude?.toFixed(4)}°E\n` +
+                   `Height: ${position.height}m\n` +
+                   `Owner: ${data.owner}\n\n` +
+                   `Available Periods:\n` +
                    periods.map(p => `  • ${p.key}: ${p.from} to ${p.to} (${p.summary})`).join('\n')
         };
     } catch (error) {
-        return {
-            type: "text",
-            text: `Error fetching metadata for station ${station_id}, parameter ${parameter}: ${error.message}`
-        };
+        return createErrorResponse(error.message, { station_id, parameter, operation: 'fetching metadata' });
     }
 }
 
@@ -393,22 +383,8 @@ export async function get_historical_data(station_id, parameter, period, limit =
             }
         }
         
-        const parameterName = {
-            [SMHIParameter.AIR_TEMP]: "Temperature",
-            [SMHIParameter.AVG_TEMP]: "Daily mean temperature",
-            [SMHIParameter.MIN_TEMP]: "Daily minimum temperature", 
-            [SMHIParameter.MAX_TEMP]: "Daily maximum temperature",
-            [SMHIParameter.MONTHLY_TEMP]: "Monthly mean temperature",
-            [SMHIParameter.DAILY_PRECIP]: "Daily precipitation",
-            [SMHIParameter.HOURLY_PRECIP]: "Hourly precipitation",
-            [SMHIParameter.PRECIP_15MIN]: "15-minute precipitation",
-            [SMHIParameter.MONTHLY_PRECIP]: "Monthly precipitation",
-            [SMHIParameter.SNOW_DEPTH]: "Snow depth"
-        }[parameter] || "Data";
-        
-        const unit = parameter.includes("TEMP") ? "°C" : 
-                    parameter.includes("PRECIP") ? "mm" :
-                    parameter === SMHIParameter.SNOW_DEPTH ? "m" : "";
+        const parameterName = getParameterName(parameter);
+        const unit = getParameterUnit(parameter);
         
         const dataPoints = paginatedValues.map(v => `${v.date}: ${v.value}${unit} (${v.quality})`).join('\n');
         
@@ -450,299 +426,23 @@ export async function get_historical_data(station_id, parameter, period, limit =
     }
 }
 
-// Station listing functions with pagination
-export async function list_all_stations_for_parameter(parameter, cursor) {
-    try {
-        const url = `${METOBS_BASE_URL}/parameter/${parameter}.json`;
-        const cacheKey = `stations-${parameter}`;
-        const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.metadata);
-        const stations = data.station || [];
-
-        const offset = cursor ? parseInt(atob(cursor), 10) : 0;
-        const pageSize = 100;
-        const pageItems = stations.slice(offset, offset + pageSize);
-
-        const nextCursor = (offset + pageSize < stations.length) ? btoa(offset + pageSize) : null;
-
-        const stationsInfo = Object.fromEntries(pageItems.map(s => [s.key, {
-            name: s.name,
-            latitude: s.latitude,
-            longitude: s.longitude,
-            height: s.height,
-            active: s.active,
-            owner: s.owner
-        }]));
-
-        const summary = `Total stations: ${stations.length}, Active: ${stations.filter(s => s.active).length}\n` +
-                      `Showing ${pageItems.length} stations (offset: ${offset})`;
-
-        let resultText = `All SMHI stations for parameter ${parameter} (paginated):\n${summary}\n\n${JSON.stringify(stationsInfo, null, 2)}`;
-        if (nextCursor) {
-            resultText += `\n\nTo get next page, use cursor: ${nextCursor}`;
-        }
-
-        return {
-            type: "text",
-            text: resultText,
-            nextCursor: nextCursor
-        };
-    } catch (e) {
-        return {
-            type: "text",
-            text: `Error: Could not fetch all stations for parameter ${parameter}: ${e.message}`
-        };
-    }
+export async function list_all_temperature_stations(cursor) {
+    return await listAllStationsForParameter(SMHIParameter.AIR_TEMP, cursor);
 }
 
-export async function list_all_temperature_stations(env, cursor) {
-    return await list_all_stations_for_parameter(SMHIParameter.AIR_TEMP, cursor);
+export async function list_all_snow_depth_stations(cursor) {
+    return await listAllStationsForParameter(SMHIParameter.SNOW_DEPTH, cursor);
 }
 
-export async function list_all_snow_depth_stations(env, cursor) {
-    return await list_all_stations_for_parameter(SMHIParameter.SNOW_DEPTH, cursor);
+export async function list_all_precipitation_stations(parameter = SMHIParameter.DAILY_PRECIP, cursor) {
+    return await listAllStationsForParameter(parameter, cursor);
 }
 
-export async function list_all_precipitation_stations(env, parameter = SMHIParameter.DAILY_PRECIP, cursor) {
-    return await list_all_stations_for_parameter(parameter, cursor);
-}
-
-export async function search_stations_by_name_multi_param(query, env, limit = 10, threshold = 0.3, active_only = true) {
+export async function search_stations_by_name_multi_param(query, limit = 10, threshold = 0.3, active_only = true) {
     const parameters = [SMHIParameter.AIR_TEMP, SMHIParameter.DAILY_PRECIP, SMHIParameter.HOURLY_PRECIP, SMHIParameter.SNOW_DEPTH];
-    const allResults = [];
-    
-    try {
-        // Search across all major parameters
-        for (const parameter of parameters) {
-            try {
-                const url = `${METOBS_BASE_URL}/parameter/${parameter}.json`;
-                const cacheKey = `stations-${parameter}`;
-                const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.metadata);
-                const stations = data.station || [];
-                
-                const normalizedQuery = normalizeSwedish(query);
-                
-                for (const station of stations) {
-                    const stationName = station.name || '';
-                    const normalizedName = normalizeSwedish(stationName);
-                    
-                    let score = 0;
-                    let matchType = '';
-                    
-                    // Exact match (case insensitive)
-                    if (normalizedName === normalizedQuery) {
-                        score = 1.0;
-                        matchType = 'exact';
-                    }
-                    // Substring match
-                    else if (normalizedName.includes(normalizedQuery)) {
-                        score = 0.9 - (Math.abs(normalizedName.length - normalizedQuery.length) / normalizedName.length) * 0.1;
-                        matchType = 'substring';
-                    }
-                    // Fuzzy match
-                    else {
-                        const similarity = calculateSimilarity(normalizedQuery, normalizedName);
-                        if (similarity >= threshold) {
-                            score = similarity;
-                            matchType = 'fuzzy';
-                        }
-                    }
-                    
-                    if (score >= threshold) {
-                        // Filter by active status if requested
-                        if (active_only && !station.active) {
-                            continue;
-                        }
-                        
-                        // Check if we already have this station from another parameter
-                        const existingResult = allResults.find(r => r.id === station.key);
-                        if (existingResult) {
-                            // Keep the result with higher score, or add parameter info
-                            if (score > existingResult.score) {
-                                existingResult.score = score;
-                                existingResult.matchType = matchType;
-                                existingResult.name = stationName;
-                                existingResult.parameter = parameter;
-                            }
-                            // Add parameter to list
-                            if (!existingResult.parameters) {
-                                existingResult.parameters = [existingResult.parameter];
-                            }
-                            if (!existingResult.parameters.includes(parameter)) {
-                                existingResult.parameters.push(parameter);
-                            }
-                        } else {
-                            allResults.push({
-                                id: station.key,
-                                name: stationName,
-                                latitude: station.latitude,
-                                longitude: station.longitude,
-                                height: station.height,
-                                active: station.active,
-                                owner: station.owner,
-                                score: score,
-                                matchType: matchType,
-                                parameter: parameter,
-                                parameters: [parameter]
-                            });
-                        }
-                    }
-                }
-            } catch (e) {
-                // Continue with other parameters if one fails
-                continue;
-            }
-        }
-        
-        // Sort by score (descending) and then by name
-        allResults.sort((a, b) => {
-            if (b.score !== a.score) return b.score - a.score;
-            return a.name.localeCompare(b.name);
-        });
-        
-        // Limit results
-        const limitedResults = allResults.slice(0, limit);
-        
-        if (limitedResults.length === 0) {
-            return {
-                type: "text",
-                text: `No stations found matching "${query}" across all parameters (threshold: ${threshold})`
-            };
-        }
-        
-        const resultsText = limitedResults.map(r => {
-            const paramNames = (r.parameters || [r.parameter]).map(p => {
-                return {
-                    [SMHIParameter.AIR_TEMP]: "Temperature",
-                    [SMHIParameter.DAILY_PRECIP]: "Daily Precipitation",
-                    [SMHIParameter.HOURLY_PRECIP]: "Hourly Precipitation",
-                    [SMHIParameter.SNOW_DEPTH]: "Snow Depth"
-                }[p] || `Parameter ${p}`;
-            }).join(', ');
-            
-            return `${r.id}: ${r.name} (${r.matchType}, score: ${r.score.toFixed(2)})\n` +
-                   `  Location: ${r.latitude}, ${r.longitude} (${r.height}m)\n` +
-                   `  Status: ${r.active ? 'Active' : 'Inactive'}, Owner: ${r.owner}\n` +
-                   `  Available for: ${paramNames}`;
-        }).join('\n\n');
-        
-        return {
-            type: "text",
-            text: `Multi-parameter station search results for "${query}":\n` +
-                   `Found ${limitedResults.length} of ${allResults.length} matches (threshold: ${threshold})\n\n` +
-                   resultsText
-        };
-        
-    } catch (e) {
-        return {
-            type: "text",
-            text: `Error: Failed to search stations across parameters: ${e.message}`
-        };
-    }
+    return await searchStationsMultiParameter(query, parameters, limit, threshold, active_only);
 }
 
-export async function search_stations_by_name(query, env, parameter = SMHIParameter.AIR_TEMP, limit = 10, threshold = 0.3, active_only = true) {
-    try {
-        const url = `${METOBS_BASE_URL}/parameter/${parameter}.json`;
-        const cacheKey = `stations-${parameter}`;
-        const data = await makeSmhiRequest(url, cacheKey, CACHE_TTL.metadata);
-        const stations = data.station || [];
-
-        if (stations.length === 0) {
-            return {
-                type: "text",
-                text: `No stations found for parameter ${parameter}`
-            };
-        }
-
-        const normalizedQuery = normalizeSwedish(query);
-        const results = [];
-
-        for (const station of stations) {
-            const stationName = station.name || '';
-            const normalizedName = normalizeSwedish(stationName);
-            
-            let score = 0;
-            let matchType = '';
-            
-            // Exact match (case insensitive)
-            if (normalizedName === normalizedQuery) {
-                score = 1.0;
-                matchType = 'exact';
-            }
-            // Substring match
-            else if (normalizedName.includes(normalizedQuery)) {
-                score = 0.9 - (Math.abs(normalizedName.length - normalizedQuery.length) / normalizedName.length) * 0.1;
-                matchType = 'substring';
-            }
-            // Fuzzy match
-            else {
-                const similarity = calculateSimilarity(normalizedQuery, normalizedName);
-                if (similarity >= threshold) {
-                    score = similarity;
-                    matchType = 'fuzzy';
-                }
-            }
-            
-            if (score >= threshold) {
-                // Filter by active status if requested
-                if (active_only && !station.active) {
-                    continue;
-                }
-                
-                results.push({
-                    id: station.key,
-                    name: stationName,
-                    latitude: station.latitude,
-                    longitude: station.longitude,
-                    height: station.height,
-                    active: station.active,
-                    owner: station.owner,
-                    score: score,
-                    matchType: matchType
-                });
-            }
-        }
-
-        // Sort by score (descending) and then by name
-        results.sort((a, b) => {
-            if (b.score !== a.score) return b.score - a.score;
-            return a.name.localeCompare(b.name);
-        });
-
-        // Limit results
-        const limitedResults = results.slice(0, limit);
-
-        if (limitedResults.length === 0) {
-            return {
-                type: "text",
-                text: `No stations found matching "${query}" for parameter ${parameter} (threshold: ${threshold})`
-            };
-        }
-
-        const parameterName = {
-            [SMHIParameter.AIR_TEMP]: "Temperature",
-            [SMHIParameter.DAILY_PRECIP]: "Daily Precipitation", 
-            [SMHIParameter.HOURLY_PRECIP]: "Hourly Precipitation",
-            [SMHIParameter.SNOW_DEPTH]: "Snow Depth"
-        }[parameter] || `Parameter ${parameter}`;
-
-        const resultsText = limitedResults.map(r => 
-            `${r.id}: ${r.name} (${r.matchType}, score: ${r.score.toFixed(2)})\n` +
-            `  Location: ${r.latitude}, ${r.longitude} (${r.height}m)\n` +
-            `  Status: ${r.active ? 'Active' : 'Inactive'}, Owner: ${r.owner}`
-        ).join('\n\n');
-
-        return {
-            type: "text",
-            text: `${parameterName} station search results for "${query}":\n` +
-                   `Found ${limitedResults.length} of ${results.length} matches (threshold: ${threshold})\n\n` +
-                   resultsText
-        };
-
-    } catch (e) {
-        return {
-            type: "text",
-            text: `Error: Failed to search stations by name: ${e.message}`
-        };
-    }
+export async function search_stations_by_name(query, parameter = SMHIParameter.AIR_TEMP, limit = 10, threshold = 0.3, active_only = true) {
+    return await searchStationsByParameter(query, parameter, limit, threshold, active_only);
 }
