@@ -98,6 +98,8 @@ function createMCPServer(env) {
                     return await toolHandlers[name](args.query, args.parameter, args.limit, args.threshold, args.active_only);
                 case "search_stations_by_name_multi_param":
                     return await toolHandlers[name](args.query, args.limit, args.threshold, args.active_only);
+                case "get_stations_near_location":
+                    return await toolHandlers[name](args.latitude, args.longitude, args.parameter, args.radius_km, args.limit, args.active_only);
                 case "list_snowmobile_conditions":
                 case "list_temperature_stations":
                 case "list_snow_depth_stations":

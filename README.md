@@ -21,7 +21,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that p
 
 **Deployed Server:** https://smhi-mcp.hakan-3a6.workers.dev
 
-## 📋 Available Tools (19 Total)
+## 📋 Available Tools (16 Total)
 
 ### Snowmobile Conditions Tools
 | Tool | Description | Parameters |
@@ -57,17 +57,26 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that p
 |------|-------------|------------|
 | `search_stations_by_name` | Search stations by name within a specific parameter type | `query`, `parameter` (1=temp, 5=precip, 8=snow), `limit`, `threshold`, `active_only` |
 | `search_stations_by_name_multi_param` | Search stations by name across all parameter types | `query`, `limit`, `threshold`, `active_only` |
+| `get_stations_near_location` | Find nearest stations to given coordinates | `latitude`, `longitude`, `parameter`, `radius_km`, `limit`, `active_only` |
 
 #### Search Parameters Details
 - **`query`** (required): Station name to search for (fuzzy matching)
 - **`parameter`** (search_stations_by_name only): Parameter type filter
   - `1` = Temperature stations
-  - `5` = Daily precipitation stations  
+  - `5` = Daily precipitation stations
   - `7` = Hourly precipitation stations
   - `8` = Snow depth stations
 - **`limit`** (optional, default: 10): Maximum number of results to return
 - **`threshold`** (optional, default: 0.3): Minimum similarity score (0.0-1.0) for fuzzy matching
 - **`active_only`** (optional, default: true): Only return stations with recent data activity
+
+#### Coordinate Search Parameters
+- **`latitude`** (required): Latitude in WGS84 decimal degrees (e.g., 65.353 for Adak)
+- **`longitude`** (required): Longitude in WGS84 decimal degrees (e.g., 18.5837 for Adak)
+- **`parameter`** (optional, default: "1"): Parameter type (1=temp, 5=precip, 8=snow)
+- **`radius_km`** (optional, default: 50): Maximum search radius in kilometers
+- **`limit`** (optional, default: 10): Maximum number of stations to return
+- **`active_only`** (optional, default: true): Only return active stations
 
 ## 🛠️ Quick Start
 
@@ -187,6 +196,25 @@ npm run dev
 }
 ```
 
+### Find Nearest Stations by Coordinates
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "method": "tools/call",
+  "params": {
+    "name": "get_stations_near_location",
+    "arguments": {
+      "latitude": 65.353,
+      "longitude": 18.5837,
+      "parameter": "1",
+      "radius_km": 50,
+      "limit": 5
+    }
+  }
+}
+```
+
 ### Get Historical Data with Pagination
 ```json
 {
@@ -230,6 +258,11 @@ curl -X POST -H "Content-Type: application/json" \
 # Search for weather stations
 curl -X POST -H "Content-Type: application/json" \
   -d '{"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "search_stations_by_name_multi_param", "arguments": {"query": "Stockholm", "limit": 3}}}' \
+  https://smhi-mcp.hakan-3a6.workers.dev
+
+# Find nearest stations to coordinates (Adak area)
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "get_stations_near_location", "arguments": {"latitude": 65.353, "longitude": 18.5837, "radius_km": 50}}}' \
   https://smhi-mcp.hakan-3a6.workers.dev
 ```
 
@@ -410,6 +443,11 @@ Claude: "Let me search for Mosekälla and get the temperature data."
 [Uses search_stations_by_name_multi_param with query "Mosekälla"]
 [Uses get_historical_data with station_id "155940", fromDate "2024-01-01", toDate "2024-01-31"]
 Claude: "Found Mosekälla (station 155940) - here's the temperature data for January 2024..."
+
+You: "Find weather stations near Adak (65.353°N, 18.5837°E)"
+Claude: "Let me find the nearest weather stations to those coordinates."
+[Uses get_stations_near_location with latitude 65.353, longitude 18.5837, radius_km 50]
+Claude: "I found 4 temperature stations within 50km: Malå (20.5km), Malå-Brännan A (22.4km), Buresjön A (40.6km), and Arvidsjaur A (41.3km)."
 ```
 
 ## 🤝 Contributing
