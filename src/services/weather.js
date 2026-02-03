@@ -129,13 +129,13 @@ export async function get_weather_forecast(lat, lon, fromDate = null, toDate = n
 
         if (fromTimestamp) {
             filteredTimeSeries = filteredTimeSeries.filter(entry =>
-                new Date(entry.validTime).getTime() >= fromTimestamp
+                new Date(entry.time).getTime() >= fromTimestamp
             );
         }
 
         if (toTimestamp) {
             filteredTimeSeries = filteredTimeSeries.filter(entry =>
-                new Date(entry.validTime).getTime() <= toTimestamp
+                new Date(entry.time).getTime() <= toTimestamp
             );
         }
 
@@ -156,19 +156,19 @@ export async function get_weather_forecast(lat, lon, fromDate = null, toDate = n
         const limitedTimeSeries = filteredTimeSeries.slice(0, maxLimit);
         
         const forecastData = limitedTimeSeries.map(entry => {
-            const params = Object.fromEntries(entry.parameters.map(p => [p.name, p.values[0]]));
-            
+            const params = entry.data || {};
+
             return {
-                validTime: entry.validTime,
-                temperature: params.t || null,
-                precipitation: params.pmean || 0,
-                windSpeed: params.ws || 0,
-                windDirection: params.wd || null,
-                cloudCover: params.tcc_mean || null,
-                visibility: params.vis || null,
-                humidity: params.r || null,
-                weatherSymbol: params.Wsymb2 || 0,
-                weatherDescription: getWeatherDescription(params.Wsymb2 || 0)
+                validTime: entry.time,
+                temperature: params.air_temperature ?? null,
+                precipitation: params.precipitation_amount_mean ?? 0,
+                windSpeed: params.wind_speed ?? 0,
+                windDirection: params.wind_from_direction ?? null,
+                cloudCover: params.cloud_area_fraction ?? null,
+                visibility: params.visibility_in_air ?? null,
+                humidity: params.relative_humidity ?? null,
+                weatherSymbol: params.symbol_code ?? 0,
+                weatherDescription: getWeatherDescription(params.symbol_code ?? 0)
             };
         });
 

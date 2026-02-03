@@ -29,11 +29,9 @@ SMHI MCP Server is a Model Context Protocol (MCP) server that provides Swedish w
 ### Testing
 Use `make test-mcp` to run the full test suite which validates:
 - MCP protocol compliance (including capabilities check)
-- All 19 available tools
-- Pagination functionality
-- Date filtering
-- Multi-resolution data access
-- Station search capabilities
+- All 6 outcome-oriented tools
+- Structured JSON response format
+- Error handling with actionable suggestions
 
 ## Architecture
 
@@ -45,7 +43,7 @@ Use `make test-mcp` to run the full test suite which validates:
 ### MCP Protocol Implementation
 The server implements full MCP compliance:
 - `initialize` method returns proper capabilities including `{ tools: { listChanged: true } }`
-- `tools/list` method returns 19 available tools
+- `tools/list` method returns 6 outcome-oriented tools
 - `tools/call` method executes weather data operations
 
 ### Data Flow
@@ -55,22 +53,63 @@ MCP Client → Cloudflare Worker → SMHI APIs
   JSON-RPC      HTTP/JSON
 ```
 
-### Tool Categories
-1. **Snowmobile Conditions Tools** (4): Region-organized stations for snowmobile conditions
-2. **Legacy Tools** (2): Deprecated individual temperature/snow station lists
-3. **Multi-Resolution Tools** (7): Advanced data access with multiple time resolutions
-4. **Station Discovery** (3): Paginated station listings from SMHI API
-5. **Historical Data** (2): Pagination and date filtering support
-6. **Station Search** (2): Fuzzy name-based station search capabilities
+### Tools (6 Outcome-Oriented)
+
+| Tool | Purpose | Key Features |
+|------|---------|--------------|
+| `check_weather` | Current conditions + 24h forecast | Accepts location name or coordinates |
+| `get_snowmobile_conditions` | Snow + temperature for regions | Parallel multi-station fetch |
+| `find_stations` | Search stations by name/coordinates | Unified search across all data types |
+| `get_weather_history` | Historical data with pagination | Human-readable enums for data_type and time_range |
+| `get_station_info` | Station metadata + current readings | Shows available data types |
+| `list_regions` | Snowmobile monitoring regions | Region discovery |
+
+### Response Format
+
+All tools return structured JSON responses:
+
+```javascript
+{
+  summary: "Human-readable summary of the result",
+  data: {
+    // Structured data payload
+  },
+  next_actions: [
+    { tool: "tool_name", args: {...}, description: "What this action does" }
+  ],
+  warnings: ["Any warnings or alerts"],
+  trace_id: "smhi-abc123"
+}
+```
+
+### Enums (Human-Readable Parameters)
+
+**Data Types:**
+- `temperature` - Air temperature readings
+- `precipitation` - Rainfall/snowfall amounts
+- `snow_depth` - Snow depth measurements
+
+**Time Ranges:**
+- `current` - Last hour of data
+- `today` - Last 24 hours
+- `this_month` - Recent monthly data
+- `historical` - Archived historical data
+
+**Regions (for snowmobile conditions):**
+- `arctic_mountain` - Arctic/Mountain areas
+- `mountain` - Mountain regions
+- `northern_sweden` - Northern Sweden
+- `coastal` - Coastal areas
+- `all` - All regions
 
 ## Key Constants
 
-### SMHI Parameters
+### SMHI Parameters (Internal)
 - Temperature: `1` (hourly), `2` (daily mean), `19` (daily min), `20` (daily max), `22` (monthly)
 - Precipitation: `5` (daily), `7` (hourly), `14` (15-min), `23` (monthly)
 - Snow depth: `8` (daily)
 
-### Data Periods
+### Data Periods (Internal)
 - `latest-hour` - Most recent hourly data
 - `latest-day` - Most recent daily data
 - `latest-months` - Recent monthly data
@@ -85,20 +124,41 @@ capabilities: { tools: { listChanged: true } }
 ```
 
 ### Error Handling
-All functions return structured responses with `type: "text"` and appropriate error messages for failed SMHI API calls.
+All errors return structured responses with:
+- Error code (e.g., `STATION_NOT_FOUND`, `NO_DATA_AVAILABLE`)
+- Human-readable message
+- Suggested next actions to resolve the issue
 
 ### Pagination
-Historical data tools support cursor-based pagination with `nextCursor`/`prevCursor` fields and configurable limits.
+Historical data supports cursor-based pagination with `next_cursor`/`prev_cursor` fields.
 
-### Date Filtering
-Historical data can be filtered by date range using ISO 8601 format (`fromDate`/`toDate` parameters).
+### Location Resolution
+The `check_weather` tool supports:
+- Major Swedish cities by name (Stockholm, Kiruna, Hemavan, etc.)
+- Coordinates (lat/lon)
+- Automatic nearest-station lookup
 
-### Station Search
-Two fuzzy search tools are available:
-- `search_stations_by_name` - Search within a specific parameter type
-- `search_stations_by_name_multi_param` - Search across all parameter types
+## File Structure
 
-**Important**: Station names can vary by parameter type. For example, station 155940 is called "Hemavan" for temperature data but "Mosekälla" for precipitation/snow data. Use the multi-parameter search when unsure which parameter type a station name appears in.
+```
+src/
+├── config/
+│   ├── constants.js    - SMHI API config, cache TTLs
+│   ├── enums.js        - Human-readable enum mappings
+│   └── tool-schemas.js - MCP tool definitions
+├── tools/
+│   ├── index.js        - Tool handler registry
+│   └── outcome-tools.js - All 6 tool implementations
+├── utils/
+│   ├── response.js     - Response builders (buildResponse, buildErrorResponse)
+│   ├── geo.js          - Haversine distance calculations
+│   ├── search.js       - Station search utilities
+│   └── ...
+├── api/
+│   └── smhi.js         - SMHI API client with caching
+└── data/
+    └── stations.js     - Snowmobile monitoring stations
+```
 
 ## Deployment
 

@@ -3,187 +3,197 @@
 
 export const TOOL_SCHEMAS = [
     {
-        name: "list_snowmobile_conditions",
-        description: "Lists weather stations relevant for snowmobile conditions, organized by region and showing both temperature and snow depth monitoring capabilities across northern Sweden and mountain regions.",
-        inputSchema: { type: "object", properties: {}, additionalProperties: false }
-    },
-    {
-        name: "list_temperature_stations",
-        description: "[DEPRECATED] Use list_snowmobile_conditions instead.",
-        inputSchema: { type: "object", properties: {}, additionalProperties: false }
-    },
-    {
-        name: "list_snow_depth_stations",
-        description: "[DEPRECATED] Use list_snowmobile_conditions instead.",
-        inputSchema: { type: "object", properties: {}, additionalProperties: false }
-    },
-    {
-        name: "get_station_temperature",
-        description: "Fetches the latest temperature reading for a specific SMHI weather station.",
+        name: "check_weather",
+        description: `Get current weather and 24h forecast for any location in Sweden.
+
+USE THIS WHEN: User asks about current weather, temperature, or forecast for a location.
+RETURNS: Current temperature from nearest station + hourly forecast for 24 hours.
+WON'T WORK FOR: Historical data (use get_weather_history instead).
+
+Examples:
+- "What's the weather in Stockholm?"
+- "How cold is it in Kiruna?"
+- "Weather forecast for Hemavan"`,
         inputSchema: {
             type: "object",
             properties: {
-                "station_id": { type: "string" }
-            },
-            required: ["station_id"]
-        }
-    },
-    {
-        name: "get_station_snow_depth",
-        description: "Fetches the latest snow depth reading for a specific SMHI weather station.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                "station_id": { type: "string" }
-            },
-            required: ["station_id"]
-        }
-    },
-    {
-        name: "get_weather_forecast",
-        description: "Retrieves weather forecast for coordinates with optional filtering.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                "lat": { type: "number" },
-                "lon": { type: "number" },
-                "fromDate": { type: "string", description: "Start date/time (ISO 8601)" },
-                "toDate": { type: "string", description: "End date/time (ISO 8601)" },
-                "limit": { type: "number", description: "Number of forecast periods (default: 8, max: 100)", default: 8 }
-            },
-            required: ["lat", "lon"]
-        }
-    },
-    {
-        name: "get_station_precipitation",
-        description: "Fetches precipitation data with multiple resolutions.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                "station_id": { type: "string" },
-                "parameter": { type: "string", description: "5=daily, 7=hourly, 14=15min, 23=monthly", default: "5" },
-                "period": { type: "string", description: "latest-day, latest-hour, latest-months, corrected-archive", default: "latest-day" }
-            },
-            required: ["station_id"]
-        }
-    },
-    {
-        name: "get_temperature_multi_resolution",
-        description: "Fetches temperature data with multiple resolutions.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                "station_id": { type: "string" },
-                "parameter": { type: "string", description: "1=hourly, 2=daily-mean, 19=daily-min, 20=daily-max, 22=monthly", default: "1" },
-                "period": { type: "string", description: "latest-hour, latest-day, latest-months, corrected-archive", default: "latest-hour" }
-            },
-            required: ["station_id"]
-        }
-    },
-    {
-        name: "get_station_metadata",
-        description: "Retrieves station metadata and available periods.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                "station_id": { type: "string" },
-                "parameter": { type: "string", description: "1=temp, 5=precip, 8=snow" }
-            },
-            required: ["station_id", "parameter"]
-        }
-    },
-    {
-        name: "get_historical_data",
-        description: "Fetches historical data with pagination and filtering.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                "station_id": { type: "string" },
-                "parameter": { type: "string", description: "1=temp, 5=precip, 8=snow" },
-                "period": { type: "string", description: "corrected-archive, latest-months, latest-day, latest-hour" },
-                "limit": { type: "number", default: 10 },
-                "cursor": { type: "string" },
-                "reverse": { type: "boolean", default: true },
-                "fromDate": { type: "string", description: "ISO 8601 date" },
-                "toDate": { type: "string", description: "ISO 8601 date" }
-            },
-            required: ["station_id", "parameter", "period"]
-        }
-    },
-    {
-        name: "list_all_temperature_stations",
-        description: "Lists all temperature stations with pagination.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                "cursor": { type: "string" }
+                location: {
+                    type: "string",
+                    description: "Place name in Sweden (e.g., 'Stockholm', 'Kiruna', 'Hemavan')"
+                },
+                lat: {
+                    type: "number",
+                    description: "Latitude in decimal degrees (alternative to location name)"
+                },
+                lon: {
+                    type: "number",
+                    description: "Longitude in decimal degrees (required if lat is provided)"
+                }
             }
         }
     },
     {
-        name: "list_all_snow_depth_stations",
-        description: "Lists all snow depth stations with pagination.",
+        name: "get_snowmobile_conditions",
+        description: `Get combined temperature and snow depth readings for snowmobile conditions.
+
+USE THIS WHEN: User asks about snowmobile conditions, snow depth, or winter conditions in northern Sweden.
+RETURNS: Temperature and snow depth from multiple monitoring stations, organized by region.
+REGIONS: arctic_mountain, mountain, northern_sweden, coastal, all
+
+Examples:
+- "What are snowmobile conditions like?"
+- "How much snow in the mountains?"
+- "Is there enough snow for snowmobiling?"`,
         inputSchema: {
             type: "object",
             properties: {
-                "cursor": { type: "string" }
+                region: {
+                    type: "string",
+                    enum: ["arctic_mountain", "mountain", "northern_sweden", "coastal", "all"],
+                    description: "Region to check. Use 'all' for overview of all regions.",
+                    default: "all"
+                }
             }
         }
     },
     {
-        name: "list_all_precipitation_stations",
-        description: "Lists all precipitation stations with pagination.",
+        name: "find_stations",
+        description: `Search for weather stations by name or coordinates.
+
+USE THIS WHEN: User wants to find a specific weather station or stations near a location.
+RETURNS: List of matching stations with their IDs, coordinates, and available data types.
+SEARCH MODES: By name (query) or by coordinates (lat/lon).
+
+Examples:
+- "Find stations near Stockholm"
+- "What stations measure snow depth?"
+- "Find weather stations in Kiruna"`,
         inputSchema: {
             type: "object",
             properties: {
-                "parameter": { type: "string", description: "5=daily, 7=hourly, 14=15min, 23=monthly", default: "5" },
-                "cursor": { type: "string" }
+                query: {
+                    type: "string",
+                    description: "Station name to search for (e.g., 'Stockholm', 'Hemavan')"
+                },
+                lat: {
+                    type: "number",
+                    description: "Latitude for coordinate search (decimal degrees)"
+                },
+                lon: {
+                    type: "number",
+                    description: "Longitude for coordinate search (decimal degrees)"
+                },
+                data_type: {
+                    type: "string",
+                    enum: ["temperature", "precipitation", "snow_depth"],
+                    description: "Type of weather data to filter by",
+                    default: "temperature"
+                },
+                radius_km: {
+                    type: "number",
+                    description: "Search radius in kilometers (for coordinate search)",
+                    default: 50
+                },
+                limit: {
+                    type: "number",
+                    description: "Maximum number of results to return",
+                    default: 10
+                },
+                active_only: {
+                    type: "boolean",
+                    description: "Only return active stations",
+                    default: true
+                }
             }
         }
     },
     {
-        name: "search_stations_by_name",
-        description: "Search stations by name within a parameter type.",
+        name: "get_weather_history",
+        description: `Retrieve historical weather data for a specific station.
+
+USE THIS WHEN: User asks about past weather, temperature trends, or historical data.
+RETURNS: Historical readings with timestamps, pagination support, and statistics.
+TIME RANGES: current (last hour), today (last 24h), this_month, historical (archive)
+DATA TYPES: temperature, precipitation, snow_depth
+
+Examples:
+- "Temperature history for station 159770"
+- "Snow depth trends this month"
+- "Historical precipitation data"`,
         inputSchema: {
             type: "object",
             properties: {
-                "query": { type: "string" },
-                "parameter": { type: "string", description: "1=temp, 5=precip, 8=snow", default: "1" },
-                "limit": { type: "number", default: 10 },
-                "threshold": { type: "number", default: 0.3 },
-                "active_only": { type: "boolean", default: true }
+                station_id: {
+                    type: "string",
+                    description: "SMHI station ID (e.g., '159770')"
+                },
+                data_type: {
+                    type: "string",
+                    enum: ["temperature", "precipitation", "snow_depth"],
+                    description: "Type of weather data to retrieve"
+                },
+                time_range: {
+                    type: "string",
+                    enum: ["current", "today", "this_month", "historical"],
+                    description: "Time period to retrieve data from"
+                },
+                from_date: {
+                    type: "string",
+                    description: "Start date filter (ISO 8601 format, e.g., '2024-01-01')"
+                },
+                to_date: {
+                    type: "string",
+                    description: "End date filter (ISO 8601 format)"
+                },
+                limit: {
+                    type: "number",
+                    description: "Number of readings to return per page",
+                    default: 20
+                },
+                cursor: {
+                    type: "string",
+                    description: "Pagination cursor from previous response"
+                }
             },
-            required: ["query"]
+            required: ["station_id", "data_type", "time_range"]
         }
     },
     {
-        name: "search_stations_by_name_multi_param",
-        description: "Search stations by name across all parameter types.",
+        name: "get_station_info",
+        description: `Get detailed information about a specific weather station.
+
+USE THIS WHEN: User wants to know what data a station provides, or its exact location.
+RETURNS: Station metadata, available data types, current readings if available.
+
+Examples:
+- "Tell me about station 159770"
+- "What data does the Hemavan station provide?"
+- "Station details for Kiruna"`,
         inputSchema: {
             type: "object",
             properties: {
-                "query": { type: "string" },
-                "limit": { type: "number", default: 10 },
-                "threshold": { type: "number", default: 0.3 },
-                "active_only": { type: "boolean", default: true }
+                station_id: {
+                    type: "string",
+                    description: "SMHI station ID to get information for"
+                }
             },
-            required: ["query"]
+            required: ["station_id"]
         }
     },
     {
-        name: "get_stations_near_location",
-        description: "Find nearest weather stations to given coordinates using geographic distance calculation.",
+        name: "list_regions",
+        description: `List available snowmobile monitoring regions in Sweden.
+
+USE THIS WHEN: User wants to know what regions are available for snowmobile conditions.
+RETURNS: List of regions with station counts and capabilities.
+
+Examples:
+- "What regions can I check?"
+- "Which areas have snow monitoring?"
+- "List snowmobile regions"`,
         inputSchema: {
             type: "object",
-            properties: {
-                "latitude": { type: "number", description: "Latitude in WGS84 decimal degrees (e.g., 65.353 for Adak)" },
-                "longitude": { type: "number", description: "Longitude in WGS84 decimal degrees (e.g., 18.5837 for Adak)" },
-                "parameter": { type: "string", description: "1=temperature, 5=daily-precip, 8=snow-depth", default: "1" },
-                "radius_km": { type: "number", description: "Maximum search radius in kilometers", default: 50 },
-                "limit": { type: "number", description: "Maximum number of stations to return", default: 10 },
-                "active_only": { type: "boolean", description: "Only return active stations", default: true }
-            },
-            required: ["latitude", "longitude"]
+            properties: {}
         }
     }
 ];

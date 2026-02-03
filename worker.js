@@ -18,17 +18,17 @@ function createMCPServer(env) {
             try {
                 switch (method) {
                     case "initialize":
-                        result = { 
-                            protocolVersion: "2025-06-18", 
+                        result = {
+                            protocolVersion: "2025-06-18",
                             capabilities: {
                                 tools: { listChanged: true },
                                 logging: {}
                             },
-                            serverInfo: { 
-                                name: "smhi-mcp", 
-                                version: "1.0.0" 
+                            serverInfo: {
+                                name: "smhi-mcp",
+                                version: "2.0.0"
                             },
-                            instructions: "SMHI MCP Server provides Swedish weather data including temperature, precipitation, snow depth, and weather forecasts from SMHI's open APIs. Use station search tools to find specific monitoring locations across Sweden. Tools support historical data, real-time conditions, and forecasting."
+                            instructions: "SMHI MCP Server provides Swedish weather data. Use check_weather for current conditions and forecasts. Use get_snowmobile_conditions for winter activity planning. Use find_stations to discover stations by name or coordinates. All responses include structured JSON with summary, data, next_actions, and warnings."
                         };
                         break;
                         
@@ -42,11 +42,10 @@ function createMCPServer(env) {
                         
                     case "tools/call":
                         const { name, arguments: args } = params;
-                        
-                        // Route to appropriate tool handler using consolidated routing
+
+                        // Route to appropriate tool handler - all tools now accept args object
                         if (toolHandlers[name]) {
-                            let toolResult = await this.routeToolCall(name, args);
-                            
+                            let toolResult = await toolHandlers[name](args || {});
                             result = { content: [toolResult] };
                         } else {
                             throw new Error(`Unknown tool: ${name}`);
@@ -69,43 +68,6 @@ function createMCPServer(env) {
                     id, 
                     error: { code: -32000, message: error.message } 
                 };
-            }
-        },
-        
-        async routeToolCall(name, args) {
-            switch (name) {
-                case "get_station_temperature":
-                    return await toolHandlers[name](args.station_id);
-                case "get_station_snow_depth":
-                    return await toolHandlers[name](args.station_id);
-                case "get_weather_forecast":
-                    return await toolHandlers[name](args.lat, args.lon, args.fromDate, args.toDate, args.limit);
-                case "get_station_precipitation":
-                    return await toolHandlers[name](args.station_id, this.env, args.parameter, args.period);
-                case "get_temperature_multi_resolution":
-                    return await toolHandlers[name](args.station_id, this.env, args.parameter, args.period);
-                case "get_station_metadata":
-                    return await toolHandlers[name](args.station_id, args.parameter);
-                case "get_historical_data":
-                    return await toolHandlers[name](args.station_id, args.parameter, args.period, args.limit, args.cursor, args.reverse, args.fromDate, args.toDate, this.env);
-                case "list_all_temperature_stations":
-                    return await toolHandlers[name](args.cursor);
-                case "list_all_snow_depth_stations":
-                    return await toolHandlers[name](args.cursor);
-                case "list_all_precipitation_stations":
-                    return await toolHandlers[name](args.parameter, args.cursor);
-                case "search_stations_by_name":
-                    return await toolHandlers[name](args.query, args.parameter, args.limit, args.threshold, args.active_only);
-                case "search_stations_by_name_multi_param":
-                    return await toolHandlers[name](args.query, args.limit, args.threshold, args.active_only);
-                case "get_stations_near_location":
-                    return await toolHandlers[name](args.latitude, args.longitude, args.parameter, args.radius_km, args.limit, args.active_only);
-                case "list_snowmobile_conditions":
-                case "list_temperature_stations":
-                case "list_snow_depth_stations":
-                    return await toolHandlers[name]();
-                default:
-                    throw new Error(`Unknown tool: ${name}`);
             }
         }
     };
@@ -164,7 +126,7 @@ export default {
         
         // 4) Generic GET request
         if (request.method === 'GET') {
-            return new Response(`SMHI MCP Server v1.0.0\n\nThis is an MCP (Model Context Protocol) server providing Swedish weather data.\n\nSupported protocols:\n- HTTP POST with JSON-RPC 2.0\n- WebSocket with JSON-RPC 2.0\n\nEndpoint: https://smhi-mcp.hakan-3a6.workers.dev\n\nTools available: 15 weather data tools\n\nFor Claude Code: Use HTTP POST with mcp-protocol-version header\nFor Claude Web UI: WebSocket connection supported\n\nLast updated: ${new Date().toISOString()}\nRequest ID: ${requestId}\n`, {
+            return new Response(`SMHI MCP Server v2.0.0\n\nThis is an MCP (Model Context Protocol) server providing Swedish weather data.\n\nSupported protocols:\n- HTTP POST with JSON-RPC 2.0\n- WebSocket with JSON-RPC 2.0\n\nEndpoint: https://smhi-mcp.hakan-3a6.workers.dev\n\nTools available: 6 outcome-oriented tools\n- check_weather: Current weather + 24h forecast\n- get_snowmobile_conditions: Snow + temp for snowmobiling\n- find_stations: Search stations by name or coordinates\n- get_weather_history: Historical data with pagination\n- get_station_info: Station metadata + current readings\n- list_regions: Snowmobile monitoring regions\n\nFor Claude Code: Use HTTP POST with mcp-protocol-version header\nFor Claude Web UI: WebSocket connection supported\n\nLast updated: ${new Date().toISOString()}\nRequest ID: ${requestId}\n`, {
                 headers: { 'Content-Type': 'text/plain' }
             });
         }
