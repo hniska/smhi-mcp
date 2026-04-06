@@ -17,6 +17,8 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that p
 - **Smart Caching**: Multi-level caching with Cloudflare Cache API and R2 storage for optimal performance
 - **Rate Limiting**: Built-in request rate limiting to respect SMHI API limits
 
+Forecasts use SMHI's `SNOW1gv1` endpoint. The legacy `PMP3gv2` forecast API was retired by SMHI on `2026-03-31`.
+
 ## 🚀 Live Demo
 
 **Deployed Server:** https://smhi-mcp.hakan-3a6.workers.dev

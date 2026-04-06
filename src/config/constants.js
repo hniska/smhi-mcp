@@ -21,7 +21,8 @@ export const SMHIPeriod = {
 };
 
 export const METOBS_BASE_URL = 'https://opendata-download-metobs.smhi.se/api/version/1.0';
-export const METFCST_BASE_URL = 'https://opendata-download-metfcst.smhi.se/api/category/pmp3g/version/2';
+export const METFCST_BASE_URL = 'https://opendata-download-metfcst.smhi.se/api/category/snow1g/version/1';
+export const METANALYS_BASE_URL = 'https://opendata-download-metanalys.smhi.se/api/category/mesan2g/version/2';
 
 // Cache TTL settings (in seconds)
 export const CACHE_TTL = {
