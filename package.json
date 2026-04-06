@@ -6,10 +6,11 @@
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
-    "test": "echo \"No tests specified\""
+    "test": "vitest run"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20231218.0",
+    "vitest": "^2.1.9",
     "wrangler": "^3.0.0"
   }
 }

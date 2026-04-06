@@ -2,7 +2,8 @@
 import { MCP_CONFIG } from './src/config/constants.js';
 import { TOOL_SCHEMAS } from './src/config/tool-schemas.js';
 import { toolHandlers } from './src/tools/index.js';
-import { checkRequestLimits } from './src/middleware/limits.js';
+import { checkRequestLimits, tooManyRequestsResponse } from './src/middleware/limits.js';
+import { isBlocked, forbiddenResponse } from './src/middleware/blocklist.js';
 import { handleSSE } from './src/handlers/sse.js';
 import { handleWebSocket } from './src/handlers/websocket.js';
 
@@ -114,6 +115,14 @@ function createMCPServer(env) {
 export default {
     async fetch(request, env, ctx) {
         const requestId = crypto.randomUUID().substring(0, 8);
+
+        // Blocklist first: refuse before doing any other work, including the
+        // per-header logging below, so a blocked flood stays cheap and quiet.
+        if (isBlocked(request, env)) {
+            console.log(`[${requestId}] Blocked ${request.headers.get('cf-connecting-ip')} (${request.method} ${request.url})`);
+            return forbiddenResponse();
+        }
+
         console.log(`[${requestId}] === INCOMING REQUEST ===`);
         console.log(`[${requestId}] Method: ${request.method}`);
         console.log(`[${requestId}] URL: ${request.url}`);
@@ -136,6 +145,14 @@ export default {
             });
         }
         
+        // Account for every request, whatever its method. Preflight is handled
+        // above and deliberately not charged.
+        const limits = await checkRequestLimits();
+        if (limits.exceeded) {
+            console.log(`[${requestId}] Daily budget spent (${limits.count} at this edge) - returning 429`);
+            return tooManyRequestsResponse(limits);
+        }
+
         // Transport detection
         const acceptHeader = request.headers.get('accept') || '';
         const contentType = request.headers.get('content-type') || '';
@@ -175,9 +192,6 @@ export default {
         }
         
         try {
-            // Check request limits
-            await checkRequestLimits();
-
             const bodyText = await request.text();
             console.log(`[${requestId}] Request body: ${bodyText}`);
 

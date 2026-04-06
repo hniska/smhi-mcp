@@ -277,6 +277,56 @@ make test-forecast
 make test-stations
 ```
 
+### Unit Tests
+
+```bash
+npm test          # vitest run
+```
+
+Covers transport behaviour (`test/mcp-transport.test.js`) and request
+accounting (`test/request-limits.test.js`). Both exist because of a real
+incident — see below.
+
+## 🛡️ Protecting the request quota
+
+### The 2026-08 runaway incident
+
+`GET /mcp` used to answer with a **finite** `text/event-stream` body: one
+`data:` line, then the stream closed. `EventSource` treats a closed stream as a
+dropped connection and reconnects after ~1s, forever. Three concurrent clients
+doing that generated ~420,000 Worker requests in four days against a
+100,000/day account limit, and tripped Cloudflare's daily limit email.
+
+The fix: a server with no server-initiated messages must answer `405` on GET,
+per the MCP Streamable HTTP spec. Conforming clients then stop retrying.
+`test/mcp-transport.test.js` locks this in.
+
+### What the in-Worker limiter can and cannot do
+
+`checkRequestLimits()` now runs for **every** method, not just POST (it
+previously sat in the POST branch only, which is why the GET flood went
+unnoticed). But be clear about its scope:
+
+> **An in-Worker limiter cannot protect the Cloudflare request quota.** By the
+> time it runs, the request is already billed. A 429 costs exactly as much
+> quota as a 200.
+
+Its real value is shedding load off the upstream SMHI APIs and failing loudly
+rather than silently. It is also backed by `caches.default`, which is
+**per-colo**, so the count is per-edge-location, not global.
+
+### Actually protecting the quota
+
+Requests must be rejected *before* they reach the Worker:
+
+1. **Put the service on a real zone** (not `*.workers.dev`) and add a WAF
+   rate-limiting rule. Traffic blocked at the WAF is not billed as a Worker
+   invocation.
+2. **Disable the `workers.dev` route** once a custom domain is in place, so the
+   unprotected hostname stops being reachable.
+3. Note that the endpoint currently has **no authentication** — anyone with the
+   URL can invoke it.
+
 ## 🏗️ Architecture
 
 ```

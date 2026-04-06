@@ -7,6 +7,18 @@ compatibility_date = "2023-12-18"
 binding = "HISTORICAL_DATA"
 bucket_name = "smhi-historical-data"
 
+[vars]
+# Comma-separated IPs refused with 403. Empty string = block nobody.
+#
+# 158.174.178.59 (Bahnhof, SE) ran an SSE reconnect loop that generated ~420k
+# requests over 2026-08-13..16. The 405 fix on GET /mcp stopped the loop; this
+# entry is defence in depth. Residential addresses are dynamic -- if this one
+# is reassigned, clear this value and redeploy.
+#
+# NOTE: a 403 here is still a billed Worker request. This denies access; it
+# does not save quota. See README, "Protecting the request quota".
+BLOCKED_IPS = "158.174.178.59"
+
 # Environment configuration
 [env.production.vars]
 # Add any public configuration variables here
