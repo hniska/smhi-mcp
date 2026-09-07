@@ -50,14 +50,14 @@ clean:
 
 # Tail logs from deployed worker
 logs:
-	wrangler tail
+	npx wrangler tail
 
 # Show deployment status
 status:
 	@echo "SMHI MCP Worker Status:"
 	@echo "URL: https://smhi-mcp.hakan-3a6.workers.dev"
 	@echo ""
-	@wrangler deployments list --name smhi-mcp 2>/dev/null || echo "Run 'make deploy' first"
+	@npx wrangler deployments list --name smhi-mcp 2>/dev/null || echo "Run 'make deploy' first"
 
 # Set up secrets interactively
 secrets:
@@ -66,7 +66,7 @@ secrets:
 	@echo "  - API_KEY (for authentication if needed)"
 	@echo ""
 	@read -p "Set API_KEY for authentication? (y/n): " confirm && \
-	if [ "$$confirm" = "y" ]; then wrangler secret put API_KEY; fi
+	if [ "$$confirm" = "y" ]; then npx wrangler secret put API_KEY; fi
 
 # Show environment configuration
 env:
@@ -79,7 +79,7 @@ env:
 	@grep -A 10 "^\[" wrangler.toml 2>/dev/null || echo "No wrangler.toml found"
 	@echo ""
 	@echo "Secrets (configured but values hidden):"
-	@wrangler secret list 2>/dev/null || echo "No secrets configured or wrangler not authenticated"
+	@npx wrangler secret list 2>/dev/null || echo "No secrets configured or wrangler not authenticated"
 
 # Update wrangler to latest version
 update:
