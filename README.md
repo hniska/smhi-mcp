@@ -49,7 +49,7 @@ Forecasts use SMHI's `SNOW1gv1` endpoint. The legacy `PMP3gv2` forecast API was 
 ### Historical Data & Pagination
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `get_historical_data` | Get historical data with pagination and date filtering | `station_id`, `parameter`, `period`, `limit`, `cursor`, `reverse`, `fromDate`, `toDate` |
+| `get_historical_data` | Get historical data with pagination and date filtering. Reads the CSV archive for `corrected-archive` and the JSON feed for the `latest-*` periods, which SMHI does not publish as CSV | `station_id`, `parameter`, `period`, `limit`, `cursor`, `reverse`, `fromDate`, `toDate` |
 | `list_all_temperature_stations` | Get all temperature stations with pagination | `cursor` (optional) |
 | `list_all_snow_depth_stations` | Get all snow depth stations with pagination | `cursor` (optional) |
 | `list_all_precipitation_stations` | Get all precipitation stations with pagination | `parameter`, `cursor` |

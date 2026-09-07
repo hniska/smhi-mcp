@@ -19,6 +19,10 @@ bucket_name = "smhi-historical-data"
 # does not save quota. See README, "Protecting the request quota".
 BLOCKED_IPS = "158.174.178.59"
 
+# Set to "1" to log every request header and body. Off by default: the Worker
+# logs one line per request instead, which keeps CPU and log ingestion down.
+DEBUG_LOGS = "0"
+
 # Environment configuration
 [env.production.vars]
 # Add any public configuration variables here

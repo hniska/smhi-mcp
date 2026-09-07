@@ -2,12 +2,17 @@
 
 import { CACHE_TTL } from '../config/constants.js';
 
+// Cache keys are built from caller-supplied values such as station ids, so
+// they are escaped before going into the cache URL. Unescaped, a station id
+// containing '/' or '?' would address a different key than intended.
+const cacheUrl = (cacheKey) => `https://cache.smhi-mcp.local/${encodeURIComponent(cacheKey)}`;
+
 /**
  * Get cached response using Cloudflare Cache API
  */
 export async function getCachedResponse(cacheKey, ttl) {
     const cache = caches.default;
-    const fullCacheUrl = `https://cache.smhi-mcp.local/${cacheKey}`;
+    const fullCacheUrl = cacheUrl(cacheKey);
     const cachedResponse = await cache.match(fullCacheUrl);
     
     if (cachedResponse) {
@@ -24,7 +29,7 @@ export async function getCachedResponse(cacheKey, ttl) {
  */
 export async function setCachedResponse(cacheKey, data, ttl) {
     const cache = caches.default;
-    const fullCacheUrl = `https://cache.smhi-mcp.local/${cacheKey}`;
+    const fullCacheUrl = cacheUrl(cacheKey);
     const response = new Response(JSON.stringify(data), {
         headers: {
             'Content-Type': 'application/json',
@@ -39,7 +44,7 @@ export async function setCachedResponse(cacheKey, data, ttl) {
 /**
  * Determine R2 cache TTL based on data characteristics
  */
-export function getR2CacheTTL(station_id, parameter, period, fromDate = null, toDate = null) {
+export function getR2CacheTTL(period, fromDate = null) {
     // Default TTL
     let ttl = CACHE_TTL.r2_csv;
     
@@ -72,16 +77,16 @@ export function getR2CacheTTL(station_id, parameter, period, fromDate = null, to
 /**
  * Get cached CSV data from R2 storage (matches worker.js exactly)
  */
-export async function getCachedCSV(station_id, parameter, period, env, fromDate = null, toDate = null) {
+export async function getCachedCSV(station_id, parameter, period, env, fromDate = null) {
     if (!env?.HISTORICAL_DATA) return null;
     
-    const key = `csv/${parameter}/${station_id}/${period}.csv`;
+    const key = `csv/${encodeURIComponent(parameter)}/${encodeURIComponent(station_id)}/${encodeURIComponent(period)}.csv`;
     
     try {
         const object = await env.HISTORICAL_DATA.get(key);
         if (object) {
             // Get dynamic TTL based on data characteristics
-            const ttlMs = getR2CacheTTL(station_id, parameter, period, fromDate, toDate);
+            const ttlMs = getR2CacheTTL(period, fromDate);
             
             const metadata = object.customMetadata;
             const cacheTime = metadata?.timestamp;
@@ -105,7 +110,7 @@ export async function getCachedCSV(station_id, parameter, period, env, fromDate 
 export async function setCachedCSV(csvText, station_id, parameter, period, env) {
     if (!env?.HISTORICAL_DATA || !csvText) return;
     
-    const key = `csv/${parameter}/${station_id}/${period}.csv`;
+    const key = `csv/${encodeURIComponent(parameter)}/${encodeURIComponent(station_id)}/${encodeURIComponent(period)}.csv`;
     
     try {
         await env.HISTORICAL_DATA.put(key, csvText, {

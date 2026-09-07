@@ -1,7 +1,9 @@
 // Weather data service functions
 
-import { SMHIParameter, SMHIPeriod, METOBS_BASE_URL, METFCST_BASE_URL, CACHE_TTL } from '../config/constants.js';
+import { SMHIParameter, METOBS_BASE_URL, METFCST_BASE_URL, CACHE_TTL } from '../config/constants.js';
 import { makeSmhiRequest, getWeatherDescription } from '../api/smhi.js';
+import { createErrorResponse } from '../utils/parameters.js';
+import { formatObservationTime } from '../utils/time.js';
 
 /**
  * Get current temperature for a weather station (matches worker.js exactly)
@@ -34,13 +36,10 @@ export async function get_station_temperature(station_id) {
         
         return {
             type: "text",
-            text: `Station ${stationName} (${station_id}): ${latestValue.value}°C at ${latestValue.date}`
+            text: `Station ${stationName} (${station_id}): ${latestValue.value}°C at ${formatObservationTime(latestValue)}`
         };
     } catch (e) {
-        return {
-            type: "text",
-            text: `Error fetching temperature for station ${station_id}: ${e.message}`
-        };
+        return createErrorResponse(e.message, { station_id, operation: 'fetching temperature' });
     }
 }
 
@@ -66,7 +65,7 @@ export async function get_station_snow_depth(station_id) {
         if (!data.value || data.value.length === 0) {
             return {
                 type: "text",
-                text: `Error: No snow depth data available for station ${station_id}`
+                text: `No snow depth data available for station ${station_id}`
             };
         }
         const latestValue = data.value[data.value.length - 1];
@@ -74,14 +73,11 @@ export async function get_station_snow_depth(station_id) {
             type: "text",
             text: `Snow depth for station ${station_id}:\n` +
                    `Snow depth: ${latestValue.value} meters\n` +
-                   `Timestamp: ${latestValue.date}\n` +
-                   `Station name: ${data.station.name || 'Unknown'}`
+                   `Timestamp: ${formatObservationTime(latestValue)}\n` +
+                   `Station name: ${data.station?.name || 'Unknown'}`
         };
     } catch (e) {
-        return {
-            type: "text",
-            text: `Error: Failed to fetch snow depth data from SMHI: ${e.message}`
-        };
+        return createErrorResponse(e.message, { station_id, operation: 'fetching snow depth' });
     }
 }
 
@@ -189,9 +185,6 @@ export async function get_weather_forecast(lat, lon, fromDate = null, toDate = n
             }, null, 2)
         };
     } catch (e) {
-        return {
-            type: "text",
-            text: `Error: Failed to fetch forecast from SMHI: ${e.message}`
-        };
+        return createErrorResponse(`Failed to fetch forecast from SMHI: ${e.message}`);
     }
 }

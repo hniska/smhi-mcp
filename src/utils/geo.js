@@ -1,6 +1,5 @@
 // Geographic utilities for coordinate-based station search
-import { CACHE_TTL } from '../config/constants.js';
-import { getParameterName } from './parameters.js';
+import { getParameterName, createErrorResponse } from './parameters.js';
 import { fetchAllStationsForParameter } from './stations.js';
 
 /**
@@ -42,16 +41,10 @@ export async function findNearestStations(latitude, longitude, parameter = '1', 
     try {
         // Validate coordinates
         if (latitude < -90 || latitude > 90) {
-            return {
-                type: "text",
-                text: `Error: Invalid latitude ${latitude}. Must be between -90 and 90.`
-            };
+            return createErrorResponse(`Invalid latitude ${latitude}. Must be between -90 and 90.`);
         }
         if (longitude < -180 || longitude > 180) {
-            return {
-                type: "text",
-                text: `Error: Invalid longitude ${longitude}. Must be between -180 and 180.`
-            };
+            return createErrorResponse(`Invalid longitude ${longitude}. Must be between -180 and 180.`);
         }
 
         // Fetch all stations for the parameter
@@ -124,9 +117,6 @@ export async function findNearestStations(latitude, longitude, parameter = '1', 
             text: `${parameterName} stations near (${latitude}°N, ${longitude}°E)\nSearch radius: ${radiusKm}km\n\n${stationList}\n\nFound ${results.length} station(s) within ${radiusKm}km (${nearbyStations.length} total in radius)`
         };
     } catch (error) {
-        return {
-            type: "text",
-            text: `Error finding nearby stations: ${error.message}`
-        };
+        return createErrorResponse(`Failed to find nearby stations: ${error.message}`);
     }
 }

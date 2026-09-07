@@ -5,7 +5,9 @@
  * Tests all MCP endpoints and multi-resolution functionality
  */
 
-const BASE_URL = 'https://smhi-mcp.hakan-3a6.workers.dev';
+// Override to test a local `wrangler dev` instance:
+//   MCP_URL=http://127.0.0.1:8787 node test-mcp.js
+const BASE_URL = process.env.MCP_URL || 'https://smhi-mcp.hakan-3a6.workers.dev';
 
 class MCPTester {
     constructor(baseUrl) {
@@ -133,7 +135,7 @@ class MCPTester {
                 arguments: { station_id: '159880' }
             });
             
-            if (!result.content || !result.content[0]?.text?.includes('Temperature:')) {
+            if (!result.content || !result.content[0]?.text?.includes('°C')) {
                 throw new Error('Invalid temperature response');
             }
             
@@ -171,7 +173,7 @@ class MCPTester {
                 }
             });
             
-            if (!result.content || !result.content[0]?.text?.includes('Daily mean temperature')) {
+            if (!result.content || !result.content[0]?.text?.includes('daily mean temperature')) {
                 throw new Error('Invalid multi-resolution temperature response');
             }
             
@@ -189,7 +191,7 @@ class MCPTester {
                 }
             });
             
-            if (!result.content || !result.content[0]?.text?.includes('Available periods')) {
+            if (!result.content || !result.content[0]?.text?.includes('Available Periods')) {
                 throw new Error('Invalid metadata response');
             }
             
@@ -269,7 +271,7 @@ class MCPTester {
                 arguments: {}
             });
             
-            if (!result.content || !result.content[0]?.text?.includes('Total stations:')) {
+            if (!result.content || !result.content[0]?.text?.includes('active stations')) {
                 throw new Error('Invalid all stations response');
             }
             
@@ -284,7 +286,7 @@ class MCPTester {
                 arguments: { parameter: '5' }
             });
             
-            if (!result.content || !result.content[0]?.text?.includes('stations for parameter 5')) {
+            if (!result.content || !result.content[0]?.text?.includes('Daily precipitation Stations')) {
                 throw new Error('Invalid precipitation stations response');
             }
             
@@ -296,13 +298,16 @@ class MCPTester {
         return this.runTest('Date/Time Filtering', async () => {
             const result = await this.makeRequest('tools/call', {
                 name: 'get_historical_data',
+                // latest-day only ever holds the last 24 hours, so the range
+                // has to follow the clock. A pinned date aged out of the window
+                // and made this test fail permanently.
                 arguments: { 
                     station_id: '159880',
                     parameter: '1',
                     period: 'latest-day',
                     limit: 5,
-                    fromDate: '2025-06-27T00:00:00Z',
-                    toDate: '2025-06-27T12:00:00Z'
+                    fromDate: new Date(Date.now() - 86400000).toISOString().split('T')[0],
+                    toDate: new Date().toISOString().split('T')[0]
                 }
             });
             

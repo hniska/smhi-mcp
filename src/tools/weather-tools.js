@@ -1,61 +1,61 @@
 // Weather tool implementations for SMHI MCP server
 import { SMHIParameter, SMHIPeriod, CACHE_TTL, METOBS_BASE_URL } from '../config/constants.js';
-import { getCachedResponse, setCachedResponse, getCachedCSV, setCachedCSV } from '../utils/cache.js';
+import { getCachedCSV, setCachedCSV } from '../utils/cache.js';
 import { makeSmhiRequest } from '../api/smhi.js';
 import { getParameterDescription, getParameterUnit, getParameterName, createErrorResponse } from '../utils/parameters.js';
 import { searchStationsByParameter, searchStationsMultiParameter } from '../utils/search.js';
 import { listAllStationsForParameter } from '../utils/stations.js';
+import { parseObservationPage } from '../utils/csv.js';
+import { formatObservationTime } from '../utils/time.js';
 import { snowmobileConditionsStations, temperatureStations, snowDepthStations } from '../data/stations.js';
 
 export async function list_snowmobile_conditions() {
-    const stationsByRegion = {
-        "Arctic/Mountain": [],
-        "Mountain": [],
-        "Northern Sweden": [],
-        "Coastal": []
-    };
-    
-    let totalStations = 0;
-    let dualCapabilityStations = 0;
-    
+    const regionOrder = ["Arctic/Mountain", "Mountain", "Northern Sweden", "Coastal"];
+    const stationsByRegion = new Map(regionOrder.map((region) => [region, []]));
+
+    let dualCapability = 0;
+    let temperatureOnly = 0;
+    let snowDepthOnly = 0;
+
     for (const [id, info] of Object.entries(snowmobileConditionsStations)) {
         const capabilities = [];
         if (info.hasTemperature) capabilities.push("Temperature");
         if (info.hasSnowDepth) capabilities.push("Snow Depth");
-        
-        if (info.hasTemperature && info.hasSnowDepth) {
-            dualCapabilityStations++;
-        }
-        
-        stationsByRegion[info.region].push({
-            id: id,
+
+        if (info.hasTemperature && info.hasSnowDepth) dualCapability++;
+        else if (info.hasTemperature) temperatureOnly++;
+        else if (info.hasSnowDepth) snowDepthOnly++;
+
+        // A station whose region is not one of the four known ones used to
+        // throw here rather than simply being listed.
+        const region = info.region || "Other";
+        if (!stationsByRegion.has(region)) stationsByRegion.set(region, []);
+        stationsByRegion.get(region).push({
+            id,
             name: info.name,
-            capabilities: capabilities.join(" + ")
+            capabilities: capabilities.join(" + ") || "None"
         });
-        totalStations++;
     }
-    
-    // Sort stations within each region by ID
-    for (const region in stationsByRegion) {
-        stationsByRegion[region].sort((a, b) => a.id.localeCompare(b.id));
-    }
-    
-    const regionOutput = Object.entries(stationsByRegion)
-        .filter(([region, stations]) => stations.length > 0)
-        .map(([region, stations]) => 
-            `📍 ${region} (${stations.length} stations):\n` + 
-            stations.map(s => `  ${s.id}: ${s.name} (${s.capabilities})`).join('\n')
-        ).join('\n\n');
-    
+
+    const totalStations = Object.keys(snowmobileConditionsStations).length;
+
+    const regionOutput = [...stationsByRegion.entries()]
+        .filter(([, stations]) => stations.length > 0)
+        .map(([region, stations]) => {
+            stations.sort((a, b) => a.id.localeCompare(b.id));
+            return `📍 ${region} (${stations.length} stations):\n` +
+                stations.map(s => `  ${s.id}: ${s.name} (${s.capabilities})`).join('\n');
+        }).join('\n\n');
+
     return {
         type: "text",
         text: `🛷 Snowmobile Conditions Monitoring Stations\n\n` +
                `${regionOutput}\n\n` +
                `📊 Summary:\n` +
                `• Total stations: ${totalStations}\n` +
-               `• Dual capability (temp + snow): ${dualCapabilityStations}\n` +
-               `• Temperature only: ${totalStations - dualCapabilityStations - Object.values(snowmobileConditionsStations).filter(s => !s.hasTemperature && s.hasSnowDepth).length}\n` +
-               `• Snow depth only: ${Object.values(snowmobileConditionsStations).filter(s => !s.hasTemperature && s.hasSnowDepth).length}\n\n` +
+               `• Dual capability (temp + snow): ${dualCapability}\n` +
+               `• Temperature only: ${temperatureOnly}\n` +
+               `• Snow depth only: ${snowDepthOnly}\n\n` +
                `💡 Use get_station_temperature or get_station_snow_depth with station IDs above.\n` +
                `🔍 Use search_stations_by_name_multi_param to find additional stations.`
     };
@@ -76,7 +76,7 @@ export async function list_snow_depth_stations() {
     };
 }
 
-export async function get_station_precipitation(station_id, env, parameter = SMHIParameter.DAILY_PRECIP, period = SMHIPeriod.LATEST_DAY) {
+export async function get_station_precipitation(station_id, parameter = SMHIParameter.DAILY_PRECIP, period = SMHIPeriod.LATEST_DAY) {
     try {
         const url = `${METOBS_BASE_URL}/parameter/${parameter}/station/${station_id}/period/${period}/data.json`;
         const cacheKey = `precipitation-${station_id}-${parameter}-${period}`;
@@ -96,14 +96,14 @@ export async function get_station_precipitation(station_id, env, parameter = SMH
         
         return {
             type: "text",
-            text: `Station ${data.station.name} (${station_id}): ${latestValue.value}${unit} ${description} at ${latestValue.date}`
+            text: `Station ${data.station?.name || station_id} (${station_id}): ${latestValue.value}${unit} ${description} at ${formatObservationTime(latestValue)}`
         };
     } catch (error) {
         return createErrorResponse(error.message, { station_id, parameter, operation: 'fetching precipitation data' });
     }
 }
 
-export async function get_temperature_multi_resolution(station_id, env, parameter = SMHIParameter.AIR_TEMP, period = SMHIPeriod.LATEST_HOUR) {
+export async function get_temperature_multi_resolution(station_id, parameter = SMHIParameter.AIR_TEMP, period = SMHIPeriod.LATEST_HOUR) {
     try {
         const url = `${METOBS_BASE_URL}/parameter/${parameter}/station/${station_id}/period/${period}/data.json`;
         const cacheKey = `temp-multi-${station_id}-${parameter}-${period}`;
@@ -123,7 +123,7 @@ export async function get_temperature_multi_resolution(station_id, env, paramete
         
         return {
             type: "text",
-            text: `Station ${data.station.name} (${station_id}): ${latestValue.value}${unit} ${description} at ${latestValue.date}`
+            text: `Station ${data.station?.name || station_id} (${station_id}): ${latestValue.value}${unit} ${description} at ${formatObservationTime(latestValue)}`
         };
     } catch (error) {
         return createErrorResponse(error.message, { station_id, parameter, operation: 'fetching temperature data' });
@@ -172,230 +172,204 @@ export async function get_station_metadata(station_id, parameter) {
     }
 }
 
-export async function get_historical_data(station_id, parameter, period, limit = 10, cursor = null, reverse = true, fromDate = null, toDate = null, env = null) {
+/**
+ * Decode a pagination cursor into a row offset.
+ *
+ * Returns `{ offset }` or `{ error }`. The previous version swallowed every
+ * decoding failure and fell back to offset 0, or let NaN through, so a bad
+ * cursor came back as a confusing empty page instead of a stated problem.
+ */
+function decodeCursor(cursor) {
+    if (cursor === null || cursor === undefined || cursor === '') return { offset: 0 };
+
+    let decoded;
+    try {
+        decoded = atob(String(cursor));
+    } catch {
+        return { error: `Invalid cursor "${cursor}". Pass a cursor from a previous response, or omit it to start at the first page.` };
+    }
+
+    const offset = Number(decoded);
+    if (!Number.isInteger(offset) || offset < 0) {
+        return { error: `Invalid cursor "${cursor}". Pass a cursor from a previous response, or omit it to start at the first page.` };
+    }
+    return { offset };
+}
+
+/**
+ * Page a decoded `value[]` array from the metobs JSON feed.
+ *
+ * Mirrors `parseObservationPage` so both feeds produce the same page shape.
+ */
+function pageJsonObservations(values, { fromDate, toDate, limit, offset, reverse }) {
+    const bound = (input, label) => {
+        if (input === null || input === undefined || input === '') return null;
+        const day = String(input).slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(Date.parse(day))) {
+            throw new Error(`Invalid ${label}: "${input}". Use ISO 8601, for example 2024-01-31.`);
+        }
+        return day;
+    };
+    const from = bound(fromDate, 'fromDate');
+    const to = bound(toDate, 'toDate');
+
+    const rows = [];
+    for (const value of values) {
+        const numeric = Number.parseFloat(value.value);
+        if (Number.isNaN(numeric)) continue;
+        const date = formatObservationTime(value);
+        // toDate covers the whole of its day, matching the CSV path.
+        const day = date.slice(0, 10);
+        if (from && day < from) continue;
+        if (to && day > to) continue;
+        rows.push({ date, value: numeric, quality: value.quality || 'Unknown' });
+    }
+
+    const total = rows.length;
+    const pageStart = reverse ? Math.max(0, total - offset - limit) : offset;
+    const pageEnd = reverse ? Math.max(0, total - offset) : Math.min(total, offset + limit);
+    const page = rows.slice(pageStart, pageEnd);
+    if (reverse) page.reverse();
+
+    return {
+        rows: page,
+        total,
+        unfilteredTotal: values.length,
+        hasMore: reverse ? pageStart > 0 : pageEnd < total
+    };
+}
+
+export async function get_historical_data(station_id, parameter, period, limit = 10, cursor = null, reverse = true, fromDate = null, toDate = null, env = null, ctx = null) {
+    const { offset, error: cursorError } = decodeCursor(cursor);
+    if (cursorError) {
+        return createErrorResponse(cursorError, { station_id, parameter });
+    }
+
     try {
         // First get metadata to find CSV download URL (cache metadata)
         const metadataUrl = `${METOBS_BASE_URL}/parameter/${parameter}/station/${station_id}/period/${period}.json`;
         const metadataCacheKey = `hist-meta-${station_id}-${parameter}-${period}`;
         let metadata;
-        
+
         try {
-            metadata = await makeSmhiRequest(metadataUrl, metadataCacheKey, CACHE_TTL.metadata);
+            metadata = await makeSmhiRequest(metadataUrl, metadataCacheKey, CACHE_TTL.metadata, ctx);
         } catch (e) {
             // If the specific parameter/period combination fails, check what's available for this station
             try {
                 const stationUrl = `${METOBS_BASE_URL}/parameter/${parameter}/station/${station_id}.json`;
                 const stationInfo = await makeSmhiRequest(stationUrl);
                 const availablePeriods = stationInfo.period?.map(p => p.key) || [];
-                
-                return {
-                    type: "text",
-                    text: `Error: No data available for station ${station_id}, parameter ${parameter}, period ${period}.\n` +
-                           `Available periods for this parameter: ${availablePeriods.join(', ') || 'none'}\n` +
-                           `Station: ${stationInfo.title || 'Unknown'}`
-                };
+
+                return createErrorResponse(
+                    `No data available for period ${period}.\n` +
+                    `Available periods for this parameter: ${availablePeriods.join(', ') || 'none'}\n` +
+                    `Station: ${stationInfo.title || 'Unknown'}`,
+                    { station_id, parameter }
+                );
             } catch (stationError) {
                 // If station doesn't support this parameter at all, suggest checking what parameters are available
-                return {
-                    type: "text",
-                    text: `Error: Station ${station_id} does not support parameter ${parameter}.\n` +
-                           `Use search_stations_by_name_multi_param to find what parameters this station supports, or try a different parameter:\n` +
-                           `• 1 = hourly temperature\n` +
-                           `• 2 = daily mean temperature\n` +
-                           `• 5 = daily precipitation\n` +
-                           `• 8 = snow depth`
-                };
+                return createErrorResponse(
+                    `Station ${station_id} does not support parameter ${parameter}.\n` +
+                    `Use search_stations_by_name_multi_param to find what parameters this station supports, or try a different parameter:\n` +
+                    `• 1 = hourly temperature\n` +
+                    `• 2 = daily mean temperature\n` +
+                    `• 5 = daily precipitation\n` +
+                    `• 8 = snow depth`
+                );
             }
         }
-        
-        // Extract CSV download URL from metadata
-        const dataSection = metadata.data?.[0];
-        const csvLink = dataSection?.link?.find(link => 
+
+        const links = metadata.data?.[0]?.link ?? [];
+        const csvLink = links.find(link =>
             link.type === 'text/plain' && link.href?.includes('data.csv')
         );
-        if (!csvLink) {
-            return {
-                type: "text",
-                text: `Error: No CSV data available for station ${station_id}, parameter ${parameter}, period ${period}`
-            };
+        const jsonLink = links.find(link =>
+            link.type === 'application/json' && link.href?.includes('data.json')
+        );
+
+        // SMHI publishes data.csv only for corrected-archive. The latest-hour,
+        // latest-day and latest-months links are advertised in the metadata but
+        // answer 406, so those periods read the JSON feed instead. Without this
+        // the tool failed for three of the four periods it documents.
+        const useCsv = period === SMHIPeriod.CORRECTED_ARCHIVE && Boolean(csvLink);
+
+        if (!useCsv && !jsonLink) {
+            return createErrorResponse(`No downloadable data for period ${period}`, { station_id, parameter });
         }
-        
-        // Try R2 cache first for CSV data
-        let csvText = await getCachedCSV(station_id, parameter, period, env, fromDate, toDate);
-        
-        if (!csvText) {
-            // Download CSV data from SMHI
-            const csvResponse = await fetch(csvLink.href, {
-                headers: {
-                    'accept': 'text/csv',
-                    'referer': 'https://opendata.smhi.se/',
-                    'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)'
-                }
-            });
-            
-            if (!csvResponse.ok) {
-                throw new Error(`CSV download failed: ${csvResponse.status} ${csvResponse.statusText}`);
-            }
-            
-            csvText = await csvResponse.text();
-            
-            // Cache the CSV in R2 for future requests
-            await setCachedCSV(csvText, station_id, parameter, period, env);
-        }
-        const lines = csvText.trim().split('\n');
-        
-        if (lines.length < 2) {
-            return {
-                type: "text",
-                text: `Error: No data found in CSV for station ${station_id}, parameter ${parameter}, period ${period}`
-            };
-        }
-        
-        // Parse CSV data - find where actual data starts (after metadata headers)
-        const values = [];
-        let dataStartIndex = -1;
-        
-        // Find the line that starts the actual data (contains "Datum;Tid" pattern for latest data)
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].trim();
-            // Look for the header that indicates actual temperature/measurement data
-            if (line.includes('Datum;Tid (UTC)') || (line.includes('Datum;Tid') && line.includes('Kvalitet'))) {
-                dataStartIndex = i + 1; // Data starts after this header line
-                break;
-            }
-        }
-        
-        // If we didn't find the specific header, try to detect data lines by pattern  
-        // But skip the position data section (which has dates from 1960s-2020s)
-        if (dataStartIndex === -1) {
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
-                const parts = line.split(';');
-                // Look for lines that start with a recent date pattern (recent data, not historical position info)
-                if (parts.length >= 3 && parts[0].match(/^202[0-9]-\d{2}-\d{2}$/)) {
-                    dataStartIndex = i;
-                    break;
-                }
-            }
-        }
-        
-        if (dataStartIndex === -1) {
-            return {
-                type: "text",
-                text: `Error: Could not find data section in CSV for station ${station_id}, parameter ${parameter}, period ${period}`
-            };
-        }
-        
-        // Parse actual data rows
-        for (let i = dataStartIndex; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line || line.startsWith(';')) continue; // Skip empty lines and metadata lines
-            
-            const parts = line.split(';');
-            if (parts.length >= 3) {
-                // CSV format for latest data: Datum;Tid (UTC);Value;Quality;;
-                const date = parts[0];
-                const time = parts[1];
-                const value = parseFloat(parts[2]);
-                const quality = parts[3];
-                
-                // Combine date and time for display
-                const dateTime = time ? `${date} ${time}` : date;
-                
-                // Only include valid data points (skip metadata/empty lines)
-                if (!isNaN(value) && date && date.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                    values.push({
-                        date: dateTime,
-                        value: value,
-                        quality: quality || 'Unknown'
+
+        let page;
+        try {
+            if (useCsv) {
+                // Try R2 cache first for CSV data
+                let csvText = await getCachedCSV(station_id, parameter, period, env, fromDate);
+
+                if (!csvText) {
+                    const csvResponse = await fetch(csvLink.href, {
+                        headers: {
+                            'accept': 'text/csv',
+                            'referer': 'https://opendata.smhi.se/',
+                            'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)'
+                        }
                     });
+
+                    if (!csvResponse.ok) {
+                        throw new Error(`CSV download failed: ${csvResponse.status} ${csvResponse.statusText}`);
+                    }
+
+                    csvText = await csvResponse.text();
+
+                    // Archives run to several megabytes. Writing one to R2 on
+                    // the response path added the whole put to the caller's
+                    // latency, so hand it to the runtime to finish afterwards.
+                    const write = setCachedCSV(csvText, station_id, parameter, period, env);
+                    if (ctx?.waitUntil) ctx.waitUntil(write);
+                    else await write;
                 }
+
+                // Reads one page out of the raw text. Building an object per row
+                // cost ~82ms CPU and ~40MB of heap on the largest archives; see
+                // utils/csv.js.
+                page = parseObservationPage(csvText, { fromDate, toDate, limit, offset, reverse });
+            } else {
+                const observations = await makeSmhiRequest(
+                    jsonLink.href,
+                    `hist-json-${station_id}-${parameter}-${period}`,
+                    CACHE_TTL.current,
+                    ctx
+                );
+                page = pageJsonObservations(observations.value ?? [], { fromDate, toDate, limit, offset, reverse });
             }
+        } catch (e) {
+            return createErrorResponse(e.message, { station_id, parameter });
         }
-        
-        if (values.length === 0) {
-            return {
-                type: "text",
-                text: `Error: No valid data points found for station ${station_id}, parameter ${parameter}, period ${period}`
-            };
+
+        if (page.unfilteredTotal === 0) {
+            return createErrorResponse('No valid data points found', { station_id, parameter });
         }
-        
-        // Apply date filtering if specified
-        let filteredData = values;
-        if (fromDate || toDate) {
-            const fromTimestamp = fromDate ? new Date(fromDate).getTime() : 0;
-            const toTimestamp = toDate ? new Date(toDate).getTime() : Infinity;
-            
-            filteredData = values.filter(item => {
-                const itemTimestamp = new Date(item.date).getTime();
-                return itemTimestamp >= fromTimestamp && itemTimestamp <= toTimestamp;
-            });
-            
-            if (filteredData.length === 0) {
-                return {
-                    type: "text",
-                    text: `No data found between ${fromDate || 'beginning'} and ${toDate || 'end'} for station ${station_id}, parameter ${parameter}, period ${period}`
-                };
-            }
+
+        if (page.total === 0) {
+            return createErrorResponse(
+                `No data between ${fromDate || 'beginning'} and ${toDate || 'end'}`,
+                { station_id, parameter }
+            );
         }
-        
-        const totalValues = filteredData.length;
-        let startIndex = 0;
-        
-        // Handle pagination cursor
-        if (cursor) {
-            try {
-                startIndex = parseInt(atob(cursor), 10);
-            } catch (e) {
-                startIndex = 0;
-            }
-        }
-        
-        // For reverse pagination (newest first), start from the end
-        let paginatedValues;
-        let nextCursor = null;
-        let prevCursor = null;
-        
-        if (reverse) {
-            // Reverse pagination: show newest data first
-            const endIndex = totalValues - startIndex;
-            const actualStartIndex = Math.max(0, endIndex - limit);
-            paginatedValues = filteredData.slice(actualStartIndex, endIndex).reverse();
-            
-            // Calculate cursors
-            if (endIndex < totalValues) {
-                prevCursor = btoa((startIndex - limit).toString());
-            }
-            if (actualStartIndex > 0) {
-                nextCursor = btoa((startIndex + limit).toString());
-            }
-        } else {
-            // Forward pagination: show oldest data first
-            const endIndex = Math.min(totalValues, startIndex + limit);
-            paginatedValues = filteredData.slice(startIndex, endIndex);
-            
-            // Calculate cursors  
-            if (startIndex > 0) {
-                prevCursor = btoa(Math.max(0, startIndex - limit).toString());
-            }
-            if (endIndex < totalValues) {
-                nextCursor = btoa(endIndex.toString());
-            }
-        }
-        
+
+        const nextCursor = page.hasMore ? btoa(String(offset + limit)) : null;
+        const prevCursor = offset > 0 ? btoa(String(Math.max(0, offset - limit))) : null;
+
         const parameterName = getParameterName(parameter);
         const unit = getParameterUnit(parameter);
-        
-        const dataPoints = paginatedValues.map(v => `${v.date}: ${v.value}${unit} (${v.quality})`).join('\n');
-        
-        let paginationInfo = `\nShowing ${paginatedValues.length} of ${totalValues} total values`;
+
+        const dataPoints = page.rows.map(v => `${v.date}: ${v.value}${unit} (${v.quality})`).join('\n');
+
+        let paginationInfo = `\nShowing ${page.rows.length} of ${page.total} total values`;
         if (fromDate || toDate) {
             paginationInfo += `\nFiltered between: ${fromDate || 'beginning'} and ${toDate || 'end'}`;
-            paginationInfo += `\nOriginal dataset: ${values.length} values`;
+            paginationInfo += `\nOriginal dataset: ${page.unfilteredTotal} values`;
         }
         if (nextCursor) paginationInfo += `\nNext page cursor: ${nextCursor}`;
         if (prevCursor) paginationInfo += `\nPrevious page cursor: ${prevCursor}`;
-        
+
         // Extract station name from metadata title (format: "Parameter - StationName: ...")
         let stationName = metadata.station?.name || metadata.name || 'Unknown';
         if (metadata.title && metadata.title.includes(' - ') && metadata.title.includes(':')) {
@@ -414,15 +388,12 @@ export async function get_historical_data(station_id, parameter, period, limit =
                    `${dataPoints}${paginationInfo}`,
             nextCursor: nextCursor,
             prevCursor: prevCursor,
-            totalCount: totalValues,
-            originalCount: values.length,
+            totalCount: page.total,
+            originalCount: page.unfilteredTotal,
             filtered: !!(fromDate || toDate)
         };
     } catch (e) {
-        return {
-            type: "text",
-            text: `Error: Failed to fetch historical data from SMHI: ${e.message}`
-        };
+        return createErrorResponse(`Failed to fetch historical data from SMHI: ${e.message}`, { station_id, parameter });
     }
 }
 

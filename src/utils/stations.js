@@ -1,7 +1,7 @@
 // Station listing and discovery utilities
 import { METOBS_BASE_URL, CACHE_TTL } from '../config/constants.js';
 import { makeSmhiRequest } from '../api/smhi.js';
-import { getParameterName } from './parameters.js';
+import { getParameterName, createErrorResponse } from './parameters.js';
 
 /**
  * List all stations for a given parameter with pagination support
@@ -68,10 +68,7 @@ export async function listAllStationsForParameter(parameter, cursor = null) {
             text: `${parameterName} Stations (Active)\n\n${stationList}${paginationInfo}`
         };
     } catch (error) {
-        return {
-            type: "text",
-            text: `Error fetching stations: ${error.message}`
-        };
+        return createErrorResponse(`Failed to fetch stations: ${error.message}`);
     }
 }
 

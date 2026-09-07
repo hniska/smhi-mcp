@@ -76,11 +76,14 @@ export function getParameterName(parameter) {
 }
 
 /**
- * Standard error response formatter
+ * Standard error response formatter.
+ *
+ * Sets `isError` so the transport can mark the tool result as failed. Without
+ * it every failure reached the client as ordinary text and read as an answer.
  */
 export function createErrorResponse(message, context = {}) {
     const { station_id, parameter, operation } = context;
-    
+
     let fullMessage = message;
     if (station_id) {
         fullMessage = `Error for station ${station_id}`;
@@ -91,10 +94,13 @@ export function createErrorResponse(message, context = {}) {
             fullMessage += ` (${operation})`;
         }
         fullMessage += `: ${message}`;
+    } else if (!/^Error\b/.test(fullMessage)) {
+        fullMessage = `Error: ${fullMessage}`;
     }
-    
+
     return {
         type: "text",
-        text: fullMessage
+        text: fullMessage,
+        isError: true
     };
 }

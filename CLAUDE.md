@@ -29,7 +29,7 @@ SMHI MCP Server is a Model Context Protocol (MCP) server that provides Swedish w
 ### Testing
 Use `make test-mcp` to run the full test suite which validates:
 - MCP protocol compliance (including capabilities check)
-- All 19 available tools
+- All 16 available tools
 - Pagination functionality
 - Date filtering
 - Multi-resolution data access
@@ -45,7 +45,7 @@ Use `make test-mcp` to run the full test suite which validates:
 ### MCP Protocol Implementation
 The server implements full MCP compliance:
 - `initialize` method returns proper capabilities including `{ tools: { listChanged: true } }`
-- `tools/list` method returns 19 available tools
+- `tools/list` method returns 16 available tools
 - `tools/call` method executes weather data operations
 
 ### Data Flow
@@ -85,13 +85,31 @@ capabilities: { tools: { listChanged: true } }
 ```
 
 ### Error Handling
-All functions return structured responses with `type: "text"` and appropriate error messages for failed SMHI API calls.
+All functions return structured responses with `type: "text"`. A failure also
+sets `isError: true` (via `createErrorResponse` in `src/utils/parameters.js`),
+which the transport lifts onto the MCP tool result so a client can tell a
+failure from an answer. JSON-RPC problems use the standard codes: -32601 for an
+unknown method, -32602 for an unknown tool or bad arguments.
 
 ### Pagination
-Historical data tools support cursor-based pagination with `nextCursor`/`prevCursor` fields and configurable limits.
+Historical data tools support cursor-based pagination with `nextCursor`/`prevCursor` fields and configurable limits. A cursor is a base64 row offset; a malformed one is refused rather than silently treated as page one.
 
 ### Date Filtering
-Historical data can be filtered by date range using ISO 8601 format (`fromDate`/`toDate` parameters).
+Historical data can be filtered by date range using ISO 8601 format (`fromDate`/`toDate` parameters). Both bounds are inclusive and `toDate` covers the whole of its day. An unparseable bound is reported, not ignored.
+
+### Historical data sources
+SMHI publishes `data.csv` only for `corrected-archive`. The `latest-hour`,
+`latest-day` and `latest-months` links appear in the metadata but answer 406, so
+`get_historical_data` reads the JSON feed for those periods.
+
+Archive CSVs are large -- Stockholm's temperature archive is 5.2 MB over 204k
+rows. `src/utils/csv.js` reads a page straight out of the raw text instead of
+building a row object per line, which is what keeps the request inside the
+Workers CPU limit.
+
+### Logging
+One line per request by default. Set `DEBUG_LOGS = "1"` in `wrangler.toml` to
+log headers and bodies while diagnosing something.
 
 ### Station Search
 Two fuzzy search tools are available:

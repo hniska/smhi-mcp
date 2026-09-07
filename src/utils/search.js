@@ -1,7 +1,7 @@
 // Station search utilities
 import { METOBS_BASE_URL, CACHE_TTL } from '../config/constants.js';
 import { makeSmhiRequest } from '../api/smhi.js';
-import { getParameterName } from './parameters.js';
+import { getParameterName, createErrorResponse } from './parameters.js';
 import { calculateSimilarity, normalizeSwedish } from './string.js';
 
 /**
@@ -27,13 +27,13 @@ export async function searchStationsByParameter(query, parameter, limit = 10, th
             .filter(s => !activeOnly || s.active)
             .map(station => {
                 const normalizedName = normalizeSwedish(station.name);
-                // Check for exact substring match first
-                const containsQuery = normalizedName.includes(normalizedQuery);
-                const similarity = calculateSimilarity(normalizedQuery, normalizedName);
-                return {
-                    ...station,
-                    score: containsQuery ? 1.0 : similarity
-                };
+                // A substring match already scores 1.0, so the edit distance --
+                // the expensive half of the loop -- is only worth computing for
+                // names that did not match outright.
+                const score = normalizedName.includes(normalizedQuery)
+                    ? 1.0
+                    : calculateSimilarity(normalizedQuery, normalizedName);
+                return { ...station, score };
             })
             .filter(s => s.score >= threshold)
             .sort((a, b) => b.score - a.score)
@@ -61,10 +61,7 @@ export async function searchStationsByParameter(query, parameter, limit = 10, th
             text: `Search results for "${query}" in ${parameterName} stations:\n\n${results}`
         };
     } catch (error) {
-        return {
-            type: "text",
-            text: `Error searching stations: ${error.message}`
-        };
+        return createErrorResponse(`Failed to search stations: ${error.message}`);
     }
 }
 
@@ -91,13 +88,14 @@ export async function searchStationsMultiParameter(query, parameters, limit = 10
                         .filter(s => !activeOnly || s.active)
                         .map(station => {
                             const normalizedName = normalizeSwedish(station.name);
-                            const containsQuery = normalizedName.includes(normalizedQuery);
-                            const similarity = calculateSimilarity(normalizedQuery, normalizedName);
+                            const score = normalizedName.includes(normalizedQuery)
+                                ? 1.0
+                                : calculateSimilarity(normalizedQuery, normalizedName);
                             return {
                                 ...station,
                                 parameter: parameter,
                                 parameterName: parameterName,
-                                score: containsQuery ? 1.0 : similarity
+                                score
                             };
                         })
                         .filter(s => s.score >= threshold);
@@ -143,9 +141,6 @@ export async function searchStationsMultiParameter(query, parameters, limit = 10
             text: `Search results for "${query}" across all parameter types:\n\n${results}`
         };
     } catch (error) {
-        return {
-            type: "text",
-            text: `Error searching stations: ${error.message}`
-        };
+        return createErrorResponse(`Failed to search stations: ${error.message}`);
     }
 }

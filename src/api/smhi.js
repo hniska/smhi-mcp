@@ -1,12 +1,19 @@
 // SMHI API client functions
 
-import { CACHE_TTL } from '../config/constants.js';
 import { getCachedResponse, setCachedResponse } from '../utils/cache.js';
 
 /**
- * Make HTTP request to SMHI API with caching (matches worker.js exactly)
+ * Make an HTTP request to the SMHI API, reading through the edge cache.
+ *
+ * @param {string} url
+ * @param {string} [cacheKey] Omit to bypass the cache.
+ * @param {number} [ttl] Seconds.
+ * @param {{waitUntil?: (p: Promise<unknown>) => void}} [ctx] Worker execution
+ *   context. When present the cache write is handed to the runtime instead of
+ *   being awaited, which kept every cache miss waiting on a write it did not
+ *   need the result of.
  */
-export async function makeSmhiRequest(url, cacheKey = null, ttl = null) {
+export async function makeSmhiRequest(url, cacheKey = null, ttl = null, ctx = null) {
     // Try cache first if caching is enabled
     if (cacheKey && ttl) {
         const cachedData = await getCachedResponse(cacheKey, ttl);
@@ -29,9 +36,14 @@ export async function makeSmhiRequest(url, cacheKey = null, ttl = null) {
     
     // Cache the response if caching is enabled
     if (cacheKey && ttl) {
-        await setCachedResponse(cacheKey, data, ttl);
+        const write = setCachedResponse(cacheKey, data, ttl);
+        if (ctx?.waitUntil) {
+            ctx.waitUntil(write);
+        } else {
+            await write;
+        }
     }
-    
+
     return data;
 }
 
