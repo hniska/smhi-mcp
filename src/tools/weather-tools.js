@@ -62,17 +62,27 @@ export async function list_snowmobile_conditions() {
 }
 
 // Legacy functions for backward compatibility (deprecated)
+function deprecatedStationList(stations) {
+    return {
+        deprecated: true,
+        replacedBy: "list_snowmobile_conditions",
+        stations: Object.entries(stations).map(([id, name]) => ({ id, name }))
+    };
+}
+
 export async function list_temperature_stations() {
     return {
         type: "text",
-        text: `⚠️  DEPRECATED: Use list_snowmobile_conditions instead.\n\nAvailable temperature stations:\n${JSON.stringify(temperatureStations, null, 2)}`
+        text: `⚠️  DEPRECATED: Use list_snowmobile_conditions instead.\n\nAvailable temperature stations:\n${JSON.stringify(temperatureStations, null, 2)}`,
+        structured: deprecatedStationList(temperatureStations)
     };
 }
 
 export async function list_snow_depth_stations() {
     return {
         type: "text",
-        text: `⚠️  DEPRECATED: Use list_snowmobile_conditions instead.\n\nAvailable snow depth stations:\n${JSON.stringify(snowDepthStations, null, 2)}`
+        text: `⚠️  DEPRECATED: Use list_snowmobile_conditions instead.\n\nAvailable snow depth stations:\n${JSON.stringify(snowDepthStations, null, 2)}`,
+        structured: deprecatedStationList(snowDepthStations)
     };
 }
 

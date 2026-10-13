@@ -1,5 +1,72 @@
 // Tool schemas for SMHI MCP server
-// Defines the input schemas for all available tools
+// Defines the input schemas for all available tools, and an outputSchema for
+// the tools that also return MCP structuredContent.
+
+const DEPRECATED_STATION_LIST_OUTPUT = {
+    type: "object",
+    properties: {
+        deprecated: { type: "boolean" },
+        replacedBy: { type: "string" },
+        stations: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    id: { type: "string", description: "SMHI station id" },
+                    name: { type: "string" }
+                },
+                required: ["id", "name"]
+            }
+        }
+    },
+    required: ["deprecated", "replacedBy", "stations"]
+};
+
+const FORECAST_OUTPUT = {
+    type: "object",
+    properties: {
+        location: {
+            type: "object",
+            properties: {
+                latitude: { type: "number" },
+                longitude: { type: "number" }
+            },
+            required: ["latitude", "longitude"]
+        },
+        forecast: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    validTime: { type: "string", description: "ISO 8601 timestamp" },
+                    // null when SMHI leaves the parameter out of an entry
+                    temperature: { type: ["number", "null"], description: "Air temperature (°C)" },
+                    windDirection: { type: ["number", "null"], description: "Degrees, direction the wind comes from" },
+                    cloudCover: { type: ["number", "null"], description: "Cloud area fraction (octas, 0-8)" },
+                    visibility: { type: ["number", "null"], description: "Kilometres" },
+                    humidity: { type: ["number", "null"], description: "Relative humidity (%)" },
+                    // Always present: missing values default to 0
+                    precipitation: { type: "number", description: "Mean precipitation (mm)" },
+                    windSpeed: { type: "number", description: "m/s" },
+                    weatherSymbol: { type: "number" },
+                    weatherDescription: { type: "string" }
+                },
+                required: ["validTime", "temperature", "precipitation", "windSpeed", "weatherSymbol", "weatherDescription"]
+            }
+        },
+        meta: {
+            type: "object",
+            properties: {
+                totalPeriods: { type: "number" },
+                returnedPeriods: { type: "number" },
+                fromDate: { type: ["string", "null"] },
+                toDate: { type: ["string", "null"] }
+            },
+            required: ["totalPeriods", "returnedPeriods"]
+        }
+    },
+    required: ["location", "forecast", "meta"]
+};
 
 export const TOOL_SCHEMAS = [
     {
@@ -10,12 +77,14 @@ export const TOOL_SCHEMAS = [
     {
         name: "list_temperature_stations",
         description: "[DEPRECATED] Use list_snowmobile_conditions instead.",
-        inputSchema: { type: "object", properties: {}, additionalProperties: false }
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        outputSchema: DEPRECATED_STATION_LIST_OUTPUT
     },
     {
         name: "list_snow_depth_stations",
         description: "[DEPRECATED] Use list_snowmobile_conditions instead.",
-        inputSchema: { type: "object", properties: {}, additionalProperties: false }
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        outputSchema: DEPRECATED_STATION_LIST_OUTPUT
     },
     {
         name: "get_station_temperature",
@@ -52,7 +121,8 @@ export const TOOL_SCHEMAS = [
                 "limit": { type: "number", description: "Number of forecast periods (default: 8, max: 100)", default: 8 }
             },
             required: ["lat", "lon"]
-        }
+        },
+        outputSchema: FORECAST_OUTPUT
     },
     {
         name: "get_station_precipitation",

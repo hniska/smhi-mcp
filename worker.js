@@ -133,11 +133,15 @@ function createMCPServer(env, ctx) {
                 return named[key];
             });
 
-            const { isError, ...content } = await handler(...positional);
+            // `isError` and `structured` belong on the tool result, not on the
+            // content item. `structured` becomes MCP `structuredContent` for
+            // tools that declare an outputSchema.
+            const { isError, structured, ...content } = await handler(...positional);
 
-            return isError
-                ? { content: [content], isError: true }
-                : { content: [content] };
+            const result = { content: [content] };
+            if (structured) result.structuredContent = structured;
+            if (isError) result.isError = true;
+            return result;
         }
     };
 }

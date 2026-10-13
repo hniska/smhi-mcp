@@ -139,15 +139,9 @@ export async function get_weather_forecast(lat, lon, fromDate = null, toDate = n
         const fromDateStr = fromDate ? String(fromDate) : null;
         const toDateStr = toDate ? String(toDate) : null;
         
-        // If no valid time series after filtering, show basic error without showing malformed dates
-        if (filteredTimeSeries.length === 0) {
-            return {
-                type: "text",
-                text: `No forecast data available for ${lat}°N, ${lon}°E in the requested time range`
-            };
-        }
-        
-        // Apply limit (default 8, max 100 to prevent excessive output)
+        // Apply limit (default 8, max 100 to prevent excessive output).
+        // An empty range (e.g. fromDate past the forecast horizon) is a normal
+        // answer, so it gets the same shape with an empty forecast array.
         const maxLimit = Math.min(limit || 8, 100);
         const limitedTimeSeries = filteredTimeSeries.slice(0, maxLimit);
         
@@ -168,21 +162,26 @@ export async function get_weather_forecast(lat, lon, fromDate = null, toDate = n
             };
         });
 
+        const payload = {
+            location: {
+                latitude: lat,
+                longitude: lon
+            },
+            forecast: forecastData,
+            meta: {
+                totalPeriods: filteredTimeSeries.length,
+                returnedPeriods: limitedTimeSeries.length,
+                fromDate: fromDateStr,
+                toDate: toDateStr
+            }
+        };
+
+        // The MCP spec asks for the serialised JSON in a text block next to
+        // structuredContent. Compact, not indented: about 29% smaller.
         return {
             type: "text",
-            text: JSON.stringify({
-                location: {
-                    latitude: lat,
-                    longitude: lon
-                },
-                forecast: forecastData,
-                meta: {
-                    totalPeriods: filteredTimeSeries.length,
-                    returnedPeriods: limitedTimeSeries.length,
-                    fromDate: fromDateStr,
-                    toDate: toDateStr
-                }
-            }, null, 2)
+            text: JSON.stringify(payload),
+            structured: payload
         };
     } catch (e) {
         return createErrorResponse(`Failed to fetch forecast from SMHI: ${e.message}`);

@@ -91,6 +91,13 @@ which the transport lifts onto the MCP tool result so a client can tell a
 failure from an answer. JSON-RPC problems use the standard codes: -32601 for an
 unknown method, -32602 for an unknown tool or bad arguments.
 
+### Structured output
+A tool with an `outputSchema` in `src/config/tool-schemas.js` also returns a
+`structured` field. The transport moves it to MCP `structuredContent`. The text
+block then holds the same data as compact JSON. At this time, these tools do
+this: `get_weather_forecast`, `list_temperature_stations` and
+`list_snow_depth_stations`. A failure sends no `structuredContent`.
+
 ### Pagination
 Historical data tools support cursor-based pagination with `nextCursor`/`prevCursor` fields and configurable limits. A cursor is a base64 row offset; a malformed one is refused rather than silently treated as page one.
 
